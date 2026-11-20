@@ -134,10 +134,8 @@ namespace BraveNewWorld.PR
                     var a = c.attack;
                     // the game's Fight takes BP per hand (PlayerCharacterParameter.GetArmConfirmedAttack)
                     var pp = a.TryCast<PlayerCharacterParameter>();
-                    var arm = c.calcInfo == null || c.calcInfo.isDominantArm ? BattleActData.ArmType.Right : BattleActData.ArmType.Left;
                     int lv = a.ConfirmedLevel(), vig = a.ConfirmedPower();
-                    int bp = pp != null ? pp.GetArmConfirmedAttack(arm) : a.ConfirmedAttack();
-                    if (bp <= 0) bp = a.ConfirmedAttack();
+                    int bp = StrikeBattlePower(c, pp, a);
                     double vanilla = VanillaFight(lv, bp, vig);
                     bool sketch = Sketching(c);
                     int vigBnw = sketch ? BattleMath.SketchVigor(a.ConfirmedMagic()) : vig;
@@ -318,6 +316,29 @@ namespace BraveNewWorld.PR
         }
 
         // vanilla FF6 Fight (the PR's): BP + (Lv * Lv * (BP + Vigor2) / 256) * 3 / 2, Vigor2 = min(2 Vigor, 255)
+        // The striking hand's battle power. Each hand's (GetArmConfirmedAttack) is the same base plus
+        // that hand's weapon; the strike's weapon is CalcInfo.userWeapon. Until 2026-11-20 the hand was
+        // picked by isDominantArm (Right, else Left), which read the empty hand for one-weapon
+        // fighters (the user's Deck: BP 1 for a moogle with a 125-BP weapon: BNW/vanilla x4.6, an
+        // 851 critical on the Moogle Defense's Captain; Terra BP 32 for 107). Now: the stronger hand,
+        // or with two weapons the hand of this strike's (the weaker one's when it's the weaker).
+        static int StrikeBattlePower(CalcControllerProvider c, PlayerCharacterParameter pp, CharacterParameterBase a)
+        {
+            if (pp == null) return a.ConfirmedAttack();
+            int right = pp.GetArmConfirmedAttack(BattleActData.ArmType.Right), left = pp.GetArmConfirmedAttack(BattleActData.ArmType.Left);
+            int bp = Math.Max(right, left);
+            var ci = c.calcInfo;
+            var used = ci?.userWeapon;
+            var rw = ci?.userRightWeapon;
+            var lw = ci?.userLeftWeapon;
+            if (used != null && rw != null && lw != null && rw.TypeId != 2 && lw.TypeId != 2)
+            {
+                var other = used.Id == rw.Id ? lw : rw;
+                if (used.Attack < other.Attack) bp = Math.Min(right, left);
+            }
+            return bp > 0 ? bp : a.ConfirmedAttack();
+        }
+
         internal static double VanillaFight(int lv, int bp, int vigor)
         {
             int vig2 = Math.Min(2 * vigor, 255);

@@ -61,6 +61,8 @@ namespace BraveNewWorld.PR
             var util = typeof(Serial.FF6.Management.SerialBattleUtility);
             Hooks.Patch(h, util, "CreateContinuousActData", typeof(RelicRules),
                 prefix: nameof(Continuous_Prefix), postfix: nameof(Continuous_Postfix));
+            Hooks.Patch(h, util, "IsSecondlyAttack", typeof(RelicRules), postfix: nameof(SecondlyAttack_Postfix),
+                args: new[] { typeof(OwnedCharacterData) });
             Hooks.Patch(h, util, "IsDisorderlyShootAttack", typeof(RelicRules), postfix: nameof(OfferingUnit_Postfix),
                 args: new[] { typeof(BattleUnitData) });
             Hooks.Patch(h, util, "IsDisorderlyShootAttack", typeof(RelicRules), postfix: nameof(OfferingAct_Postfix),
@@ -159,6 +161,28 @@ namespace BraveNewWorld.PR
         {
             var util = Last.Management.BattleProviderManager.Instance?.GetSerialBattleUtility();
             return c != null && util != null && util.IsSecondlyAttack(c);
+        }
+
+        // BNW: dual wield is a weapon property (equip ability 252 lets a second weapon into the off
+        // hand). The PR's own check (IsSecondlyAttack(OwnedCharacterData), decompiled 2026-11-20:
+        // tools/decomp/dualwield) also wants the Genji Glove (accessory 112) in an accessory slot,
+        // which BNW doesn't have, so two weapons in hand struck once (the user's Locke, two Dirks).
+        // Two real weapons in slots 1 and 2 (neither the unarmed weapon, type 2) strike twice; the
+        // -25% for two weapons follows (Physical_Postfix reads this through DualWielding).
+        public static void SecondlyAttack_Postfix(OwnedCharacterData ownedCharacterData, ref bool __result)
+        {
+            if (__result || !Enabled || FormulaProbe.Active || ownedCharacterData == null) return;
+            try
+            {
+                var eq = ownedCharacterData.EquipmentData;
+                if (eq == null || !eq.ContainsKey(Last.Defaine.EquipSlotType.Slot1) || !eq.ContainsKey(Last.Defaine.EquipSlotType.Slot2)) return;
+                var right = eq[Last.Defaine.EquipSlotType.Slot1]?.Weapon;
+                var left = eq[Last.Defaine.EquipSlotType.Slot2]?.Weapon;
+                if (right == null || left == null || right.TypeId == 2 || left.TypeId == 2) return;
+                __result = true;
+                Hooks.NoteOnce("dual-wield", () => $"[relics] {ownedCharacterData.Name} holds two weapons: strikes twice (BNW, no Genji Glove)");
+            }
+            catch (Exception e) { Hooks.WarnOnce("RelicRules.DualWield", e); }
         }
 
         // BNW's Offering weapons make the attack an Offering ("disorderly shoot") attack
