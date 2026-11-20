@@ -990,5 +990,51 @@ class BnwFidelity(unittest.TestCase):
         self.assertLessEqual({153, 154}, set(data["spirit"]["weapon_flag_abilities"]), "!WindSlash, !Aero")
 
 
+class Dialogue(unittest.TestCase):
+    """BNW's script and Vanilla New World's (tools/bnw_dialog.py) as the plugin applies them."""
+
+    @classmethod
+    def setUpClass(cls):
+        path = os.path.join(P.ROOT, "mods", "BraveNewWorld", "bnw_dialog.json")
+        if not os.path.exists(path):
+            raise unittest.SkipTest("no bnw_dialog.json (tools/bnw_dialog.py)")
+        cls.data = json.load(open(path, encoding="utf-8"))
+        cls.pr = {}
+        for line in open(f"{P.MESSAGE}/story_mes_en.txt", encoding="utf-8").read().splitlines():
+            if "	" in line:
+                k, v = line.split("	", 1)
+                cls.pr[k] = v
+
+    def test_both_scripts(self):
+        bnw, vnw = self.data["bnw"], self.data["vnw"]
+        self.assertGreater(len(bnw), 2400)
+        self.assertGreater(len(vnw), 2400)
+        differ = sum(1 for k in vnw if vnw[k] != bnw.get(k))
+        self.assertTrue(100 < differ < 400, f"Vanilla New World differs on {differ} lines")
+
+    def test_lines_are_the_prs_and_clean(self):
+        import re
+        for name in ("bnw", "vnw"):
+            for k, pages in self.data[name].items():
+                self.assertIn(k, self.pr, k)
+                self.assertFalse(k.startswith("SPEAKER"), k)
+                pr = self.pr[k]
+                self.assertNotIn("<CT>", pr, f"{k}: centered narration stays the PR's")
+                self.assertNotIn("(FULL_SPACE)", pr, f"{k}: timed lines stay the PR's")
+                for page in pages:
+                    self.assertTrue(page.strip(), k)
+                    self.assertIsNone(re.search(r"<(?!WAIT|AUTO_P|PRESS|P>)[^>]*>", page), f"{k}: {page}")
+                    self.assertIsNone(re.search(r"[\{}|^£_]", page), f"{k}: SNES glyph left: {page}")
+                    self.assertLessEqual(len(page), 240, k)
+
+    def test_known_lines(self):
+        bnw, vnw = self.data["bnw"], self.data["vnw"]
+        # dialogue 2 (Wedge: "Probably, judging from the urgency of our orders.") is E0001_03_020_a_05
+        self.assertEqual(bnw.get("E0001_03_020_a_05"), ["Probably, judging from the urgency of our orders."])
+        # Mog's fourth-wall joke in BNW, which Vanilla New World leaves out
+        self.assertIn("get me earlier", " ".join(bnw.get("E0438_00_020_a_02", [])))
+        self.assertIn("Don't scare me", " ".join(vnw.get("E0438_00_020_a_02", [])))
+
+
 if __name__ == "__main__":
     unittest.main()

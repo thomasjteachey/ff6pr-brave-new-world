@@ -174,6 +174,7 @@ namespace BraveNewWorld.PR
             EsperLevelDisplay.Apply(harmony);
             BnwEnemyAi.Apply(harmony, dataPath);   // no switch: the port gives these monsters only the plugin's shim
             if (encounterRates.Value) BnwEncounters.Apply(harmony, dataPath, randomEncounters);
+            DialogText.Apply(harmony, Path.GetDirectoryName(dataPath), Config);   // BNW's script / Vanilla New World's on the story lines
             FormulaProbe.Init(harmony);  // only when BepInEx/bnw_probe.request exists
             AddComponent<BnwRunner>();
             L.LogInfo($"Brave New World PR plugin loaded: {EsperHooks.D.Espers.Count} espers, " +
@@ -215,6 +216,7 @@ namespace BraveNewWorld.PR
             if (verified && frame % 300 == 0) { HardItems.Fix(); RelicRules.SetConstants(); }
             TestKitHotkey.Update();
             BnwEnemyAi.Update();
+            DialogText.Update();
             FormulaProbe.Update();
             if (verified && !veldtChecked && frame % 60 == 0)
             {

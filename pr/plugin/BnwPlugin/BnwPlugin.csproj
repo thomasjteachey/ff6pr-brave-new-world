@@ -3,6 +3,7 @@
     <PrGame>ff6</PrGame>
     <AssemblyName>BraveNewWorld.PR</AssemblyName>
     <BnwData>$(MSBuildThisFileDirectory)..\..\mods\BraveNewWorld\bnw_data.json</BnwData>
+    <BnwDialog>$(MSBuildThisFileDirectory)..\..\mods\BraveNewWorld\bnw_dialog.json</BnwDialog>
   </PropertyGroup>
   <!-- the modding kit (plugin/PrKit/*.cs) and the game's BepInEx + interop references; GameDir comes
        from plugin/PrKit/Games.props (tools/kit.py games, its write-props option) -->
@@ -18,5 +19,6 @@
   <!-- dotnet build -c Release -p:Deploy=true  (game must be closed: the DLL is locked while it runs) -->
   <Target Name="Deploy" AfterTargets="Build" Condition="'$(Deploy)' == 'true'">
     <Copy SourceFiles="$(TargetPath);$(BnwData)" DestinationFolder="$(GameDir)\BepInEx\plugins\BraveNewWorld" />
+    <Copy SourceFiles="$(BnwDialog)" DestinationFolder="$(GameDir)\BepInEx\plugins\BraveNewWorld" Condition="Exists('$(BnwDialog)')" />
   </Target>
 </Project>
