@@ -795,6 +795,29 @@ namespace BraveNewWorld.PR
             return sb.ToString();
         }
 
+        // the event interpreter's simple fields, and one level into its cores (where a battle script waits:
+        // the Whelk's intro held a headless battle paused, 2026-11-20)
+        static string ScriptState()
+        {
+            var sb = new StringBuilder();
+            void Fields(object o, string prefix, int depth)
+            {
+                if (o == null) return;
+                foreach (var p in o.GetType().GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+                {
+                    if (p.GetIndexParameters().Length > 0 || p.Name == "Pointer" || p.Name == "WasCollected" || p.Name == "ObjectClass") continue;
+                    object v;
+                    try { v = p.GetValue(o); } catch { continue; }
+                    var t = p.PropertyType;
+                    if (t.IsPrimitive || t.IsEnum || t == typeof(string)) sb.Append($"{prefix}{p.Name}={v}; ");
+                    else if (depth > 0 && v != null && (p.Name.IndexOf("core", StringComparison.OrdinalIgnoreCase) >= 0 || t.Name.IndexOf("Core", StringComparison.Ordinal) >= 0))
+                        Fields(v, prefix + p.Name + ".", depth - 1);
+                }
+            }
+            try { Fields(Last.Interpreter.Integrator.Instance, "", 1); } catch (Exception e) { sb.Append($"? {e.GetType().Name}: {e.Message}"); }
+            return sb.ToString();
+        }
+
         static void StepAiTest(float now)
         {
             var battle = BattlePlugManager.Instance();
@@ -821,7 +844,17 @@ namespace BraveNewWorld.PR
                 Finish($"AI test: {aiKnocks} knockouts done, the battle goes on");
                 return;
             }
-            var target = battle.GetEnemyUnits().FirstOrDefault(u => u?.BattleUnitDataInfo?.Parameter?.CurrentHP > 0);
+            // "aiko=<PR monster id>": knock out that one; "aiko=-1": no knockouts, the party's own attacks do
+            // it (a killing hit inside an act: the user's Whelk, 2026-11-20), and <aitest> counts 6 s rounds
+            int ko = Int("aiko", 0);
+            if (ko < 0)
+            {
+                aiKnocks++;
+                Plugin.L.LogInfo($"[probe] AI test: round {aiKnocks}: enemies {Units()}");
+                if (aiKnocks <= 3) Plugin.L.LogInfo($"[probe] AI test: script state {ScriptState()}");
+                return;
+            }
+            var target = battle.GetEnemyUnits().FirstOrDefault(u => u?.BattleUnitDataInfo?.Parameter?.CurrentHP > 0 && (ko == 0 || u.GetMonster()?.Id == ko));
             if (target == null) return;
             aiKnocks++;
             Plugin.L.LogInfo($"[probe] AI test: knockout {aiKnocks}: enemies {Units()}");
