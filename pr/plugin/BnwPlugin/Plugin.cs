@@ -131,6 +131,9 @@ namespace BraveNewWorld.PR
             CommandRules.Dance = danceRules.Value;
             DamageLog.Enabled = damageLog.Value;
             var harmony = new Harmony(Guid);
+            // BNW's own saves, apart from vanilla's and WC's (the user, 2026-11-19), synced by Steam Cloud (PrKit/ModSaves.cs)
+            ModSaves.IsTestRun = () => FormulaProbe.Running || TestRun.Running;
+            ModSaves.Apply(harmony, "BraveNewWorld");
             EsperHooks.Apply(harmony);
             BattleRewards.Apply(harmony);
             WeaponProcs.Apply(harmony);
@@ -163,6 +166,7 @@ namespace BraveNewWorld.PR
             EsperMenu.Apply(harmony);
             EsperList.Apply(harmony);
             EsperLevelDisplay.Apply(harmony);
+            BnwEnemyAi.Apply(harmony, dataPath);   // no switch: the port gives these monsters only the plugin's shim
             FormulaProbe.Init(harmony);  // only when BepInEx/bnw_probe.request exists
             AddComponent<BnwRunner>();
             L.LogInfo($"Brave New World PR plugin loaded: {EsperHooks.D.Espers.Count} espers, " +
@@ -203,6 +207,7 @@ namespace BraveNewWorld.PR
             BattleFormulas.Track();  // Shock's cost to its user, after its hits
             if (verified && frame % 300 == 0) { HardItems.Fix(); RelicRules.SetConstants(); }
             TestKitHotkey.Update();
+            BnwEnemyAi.Update();
             FormulaProbe.Update();
             if (verified && !veldtChecked && frame % 60 == 0)
             {

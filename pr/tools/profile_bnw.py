@@ -60,6 +60,13 @@ class BraveNewWorld(Profile):
     # sprites (port_sprites): the dragons BNW redrew as Doom Dragon recolors keep their own
     # distinct PR art; Kaiser (new in BNW, vanilla's empty CzarDragon slot) stands in as Doom Dragon
     battle_messages = True  # monster battle lines in compiled AI (battle_text; WC's live seeds don't load story text)
+    # monsters run BNW's own scripts in the plugin (the kit's SnesAiHost, the user 2026-11-19: "Start putting
+    # BNW's monsters on the kit's AI interpreter"), with BNW's engine changes to how scripts run
+    # (SnesAiRules.Bnw: c2.asm's counter rules, MP-low x128, vindictive targeting, bosses die by script)
+    # and the misc effects its boss deaths use; bnw_data.json carries the scripts (snes_ai)
+    snes_ai = True
+    snes_ai_rules = "bnw"
+    snes_ai_status = True
     sprite_keep = {329, 331, 336}
     sprite_standins = {311: 37}
     # encounter types: BNW weights back/pincer/side/normal 33/33/33/156 of 255 (c2.asm:3953;
@@ -114,6 +121,9 @@ class BraveNewWorld(Profile):
         data["boss_tests"] = [{"snes_id": t["snes_id"], "name": names[t["snes_id"]].name, "parties": t["parties"],
                                "hybrid": t.get("hybrid", False)}
                               for t in getattr(port_ai.port, "boss_tests", [])]
+        sa = getattr(port_ai.port, "snes_ai", None)
+        if sa is not None and self.snes_ai:
+            data["snes_ai"] = sa   # the plugin's SnesAiHost runs these (BnwEnemyAi.cs)
         return {"bnw_data.json": data}
 
     def extra_messages(self, rom):

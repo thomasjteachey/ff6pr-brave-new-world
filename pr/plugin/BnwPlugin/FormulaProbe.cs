@@ -16,6 +16,7 @@ using Last.Defaine;
 using Last.Defaine.Master;
 using Last.Defaine.User;
 using Last.Management;
+using Last.Map;
 using Last.Systems;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -42,10 +43,13 @@ namespace BraveNewWorld.PR
         internal static bool Active;   // stat overrides answer (inside a probe call)
         internal static bool Running;  // a probe run is in progress
 
-        enum Step { Off, Title, Field, Battle, Probing, Shop, Learn, Win, NewGame, Done }
+        enum Step { Off, Title, Field, Battle, Probing, Shop, Learn, Win, NewGame, AiTest, Done }
         static Step step = Step.Off;
         static float stepSince, startedAt, titleSince = -1, lastTry;
         static bool loadCalled;
+        static float titleWaitLog, loadAt;
+        static int loadTries;
+        static int loadMap = -1;   // the loaded save's map (-1: a new game, any field)
         static int encounterTries;
 
         static string requestPath, outPath;
@@ -86,6 +90,13 @@ namespace BraveNewWorld.PR
                 Plugin.L.LogInfo($"[probe] shop check requested: {sc}");
             }
             PatchOverrides(h);
+            // a copy of the player's save folder for this run (PrKit ModSaves: BNW's first start, its copy and
+            // loads through BNW's names, without the player's folder or Steam Cloud)
+            if (Settings.TryGetValue("savesandbox", out var sbx) && Directory.Exists(sbx))
+            {
+                PrKit.ModSaves.Sandbox = sbx;
+                Plugin.L.LogInfo($"[probe] saves from the sandbox {sbx}");
+            }
             PatchNoSaves(h);
             bool harness = Settings.TryGetValue("harness", out var hsv) && hsv == "1";
             bool newGameCheck = (Settings.TryGetValue("newgamecheck", out var ngv) && ngv == "1") || harness;
@@ -107,6 +118,19 @@ namespace BraveNewWorld.PR
                     else Plugin.L.LogInfo($"[probe] battle check: {type.Name}.{name} not found");
                 }
                 Plugin.L.LogInfo("[probe] battle check requested: a battle won, the abilities it teaches");
+            }
+            if (Settings.TryGetValue("aitest", out var at) && int.TryParse(at, out aiTest) && aiTest > 0)
+            {
+                // "ainew=1": from a New Game (the opening plays out until the party walks free) instead of a save
+                if (Settings.TryGetValue("ainew", out var an) && an == "1") newGame = true;
+                Plugin.L.LogInfo($"[probe] AI test requested: formation {Int("party", 7)}, {aiTest} knockouts{(newGame ? ", from a New Game" : "")}");
+                // a loaded save may sit in an event (the PC's latest is an autosave mid-opening): its message
+                // boxes complete at once while the test waits for the field to be free
+                if (shopCheck == null)
+                {
+                    var msg = AccessTools.Method(typeof(Last.Interpreter.Instructions.Message), "Msg");
+                    if (msg != null) h.Patch(msg, prefix: new HarmonyMethod(typeof(FormulaProbe), nameof(Msg_Prefix)));
+                }
             }
             if (Settings.TryGetValue("learncheck", out var lc))
             {
@@ -161,6 +185,7 @@ namespace BraveNewWorld.PR
                     case Step.Learn: StepLearn(now); break;
                     case Step.Win: StepWin(now); break;
                     case Step.NewGame: StepNewGame(now); break;
+                    case Step.AiTest: StepAiTest(now); break;
                 }
             }
             catch (Exception e) { Finish($"step {step} failed: {e}"); }
@@ -177,14 +202,27 @@ namespace BraveNewWorld.PR
 
         static void StepTitle(float now)
         {
-            if (OnField()) { Go(Step.Field); return; }
+            // on the field: the loaded save's map (the title's idle demo plays the opening on a field of its
+            // own: Terra, Biggs and Wedge in armor, and a battle started there never finishes an act: every
+            // probe battle until 2026-11-19 ran in it); a new game's (no map known) as soon as it's there
+            if (OnField() && loadCalled && Object.FindObjectOfType<Last.UI.KeyInput.TitleWindowController>() == null) { Go(Step.Field); return; }
+            if (loadCalled && now - titleWaitLog >= 5)
+            {
+                titleWaitLog = now;
+                Plugin.L.LogInfo($"[probe] waiting for the save's field: on field {OnField()}, map {UserDataManager.Instance()?.CurrentMapId} (save's {loadMap}), " +
+                                 $"field map {Object.FindObjectOfType<FieldMap>() != null}, title {Object.FindObjectOfType<Last.UI.KeyInput.TitleWindowController>() != null}");
+            }
             var mm = MasterManager.Instance;
-            if (mm == null || !mm.isInitialized || loadCalled) return;
             bool title = Object.FindObjectOfType<Last.UI.KeyInput.TitleWindowController>() != null ||
                          Object.FindObjectOfType<Last.UI.Touch.TitleWindowController>() != null;
+            // a load asked for while the title was still coming up does nothing: ask again (twice at most)
+            if (loadCalled && !newGame && title && loadMap != -1 && !OnField() && now - loadAt > 40 && loadTries < 3) loadCalled = false;
+            if (mm == null || !mm.isInitialized || loadCalled) return;
             if (title && titleSince < 0) titleSince = now;
-            // load 3 s after the title shows, or after 45 s anyway (a title we don't recognise)
-            if (!(title && now - titleSince >= 3) && now - startedAt < 45) return;
+            // load 12 s after the title shows (a load during its intro is ignored), or after 45 s anyway
+            if (!(title && now - titleSince >= 12) && now - startedAt < 45) return;
+            loadAt = now;
+            loadTries++;
             if (newGame)
             {
                 // the title's own New Game command (WcTest's way: TitleWindowController.SetCommand)
@@ -199,10 +237,17 @@ namespace BraveNewWorld.PR
                 return;
             }
             var mgr = SaveSlotManager.Instance();
-            var slot = mgr?.GetLatestSaveSlotData(false, false);
-            if (slot == null) { Finish("no save to load"); return; }
+            // request "slot=<n>": that save instead of the latest
+            bool pick = Settings.TryGetValue("slot", out var sv) && int.TryParse(sv, out var sn);
+            var slot = pick ? mgr?.GetTargetSaveSlotData(int.Parse(sv)) : mgr?.GetLatestSaveSlotData(false, false);
+            if (slot == null) { Finish(pick ? $"no save in slot {sv}" : "no save to load"); return; }
             loadCalled = true;
-            Plugin.L.LogInfo("[probe] loading the latest save");
+            Plugin.L.LogInfo(pick ? $"[probe] loading save {slot.Id} ({slot.TimeStamp})" : $"[probe] loading the latest save ({slot.Id}, {slot.TimeStamp})");
+            // the save's own map (its mapData), so the title's idle demo (a field of its own) doesn't pass for it
+            var mm2 = System.Text.RegularExpressions.Regex.Match(slot.mapData ?? "", @"""mapId""\s*:\s*(\d+)");
+            loadMap = mm2.Success ? int.Parse(mm2.Groups[1].Value) : -1;
+            if (loadMap < 0) Plugin.L.LogWarning($"[probe] no map id in save {slot.Id}'s map data: any field will do ({(slot.mapData ?? "").Length} chars)");
+            else Plugin.L.LogInfo($"[probe] save {slot.Id}'s map: {loadMap} (try {loadTries})");
             mgr.GotoLoadSaveData(slot);
         }
 
@@ -563,16 +608,84 @@ namespace BraveNewWorld.PR
         {
             if (shopCheck != null) { shopAt = now; Go(Step.Shop); return; }
             if (learnCheck != null) { Go(Step.Learn); return; }
-            if (newGame) { Go(Step.NewGame); return; }
+            if (newGame && aiTest <= 0) { Go(Step.NewGame); return; }
             var battle = BattlePlugManager.Instance();
-            if (battle != null && battle.IsBattle()) { Go(Step.Battle); return; }
+            if (aiTest > 0 && !aiStarted)
+            {
+                // the AI test's battle starts on a free field: an event (and any battle it starts) plays out
+                // first, messages skipped and its battles fought on auto (an event holds the script
+                // interpreter: a battle started under it never runs an act or a monster's AI, 2026-11-19)
+                var busy = Last.Interpreter.Integrator.Instance;
+                bool eventOn = busy != null && busy.IsMainCoreAlive();
+                bool inBattle = battle != null && battle.IsBattle();
+                if (eventOn) aiSawEvent = true;
+                if (eventOn || inBattle) aiFreeSince = -1;
+                else if (aiFreeSince < 0) aiFreeSince = now;
+                // "aiwarp=<map>:<point>": the first free moment after a New Game's intro, off to a quiet map
+                // (the opening's first Narshe battle waits for its tutorial's button press: it never ends here)
+                if (!eventOn && !inBattle && !aiWarped && aiSawEvent && CurrentMap() > 0 && Settings.TryGetValue("aiwarp", out var aw) &&
+                    Object.FindObjectOfType<FieldMap>()?.fieldController != null)
+                {
+                    var parts = aw.Split(':');
+                    var ep = Object.FindObjectOfType<MainGame>()?.eventProcedure;
+                    if (ep != null && int.TryParse(parts[0], out int wm))
+                    {
+                        aiWarped = true;
+                        aiWarpAt = now;
+                        int wp = parts.Length > 1 && int.TryParse(parts[1], out int pp) ? pp : 1;
+                        var ld = new LoadData();
+                        ld.NextMapData(wm, wp, (ViewType)0);
+                        ep.EventGotoMap(ld, false, false);
+                        aiFreeSince = -1;
+                        Plugin.L.LogInfo($"[probe] AI test: warp to map {wm} point {wp} (from map {CurrentMap()})");
+                        return;
+                    }
+                }
+                if (eventOn || inBattle || now - aiFreeSince < 5 || (aiWarped && now - aiWarpAt < 8))   // free for 5 s: not a gap between two events
+                {
+                    SkipMessages = true;
+                    if (inBattle) KeepBattleMoving(battle);
+                    if (now - stepSince > 540) { Finish($"the field stayed busy for 9 minutes ({(eventOn ? busy.scriptName : "a battle")})"); return; }
+                    if ((eventOn || inBattle) && now - aiBusyLog >= 10)
+                    {
+                        aiBusyLog = now;
+                        Plugin.L.LogInfo($"[probe] AI test: waiting for a free field ({(eventOn ? "event " + busy.scriptName : "")}{(inBattle ? " in battle" : "")}, map {CurrentMap()})");
+                    }
+                    return;
+                }
+                if (now - stepSince < 4 || now - lastTry < 3) return;
+            }
+            else if (battle != null && battle.IsBattle()) { Go(Step.Battle); return; }
             if (now - stepSince < 4 || now - lastTry < 6) return;
             if (encounterTries++ >= 5) { Finish("could not start a battle from the field"); return; }
             lastTry = now;
             var controller = Object.FindObjectOfType<FieldMap>()?.fieldController;
             var party = MasterManager.Instance.GetData<MonsterParty>(partyId);
+            if (aiTest > 0 && !aiStarted && controller == null && party != null)
+            {
+                aiFreeSince = -1;   // between maps: wait on
+                encounterTries--;
+                return;
+            }
             if (controller == null || party == null) { Finish($"no field controller or formation {partyId}"); return; }
-            Plugin.L.LogInfo($"[probe] starting formation {partyId}");
+            Plugin.L.LogInfo($"[probe] starting formation {partyId}{(aiTest > 0 ? " (EncountBoss)" : "")}");
+            if (aiTest > 0)
+            {
+                // the AI test: an event battle (the script command EncountBoss, WC's test battles' way): one
+                // started as a random encounter (below) never ran its monsters' AI here (2026-11-19)
+                var mc = new Last.Interpreter.MainCore();
+                var op = new Last.Interpreter.Instructions.Format.Operands();
+                op.iValues = new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<int>(8);
+                op.rValues = new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<double>(8);
+                op.sValues = new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStringArray(8);
+                for (int k = 0; k < 8; k++) op.sValues[k] = "";
+                op.iValues[0] = partyId;
+                mc.currentInstruction = new Last.Interpreter.Instructions.Format.Mnemonic { mnemonic = "EncountBoss", operands = op };
+                SkipMessages = false;   // the battle's own lines show as they would
+                Last.Interpreter.Instructions.External.Misc.EncountBoss(mc);
+                aiStarted = true;
+                return;
+            }
             controller.Last_Map_IMapEncounter_ExcuteEncount(party, party.BattleBackgroundAssetId);
         }
 
@@ -580,9 +693,21 @@ namespace BraveNewWorld.PR
         {
             var battle = BattlePlugManager.Instance();
             if (battle == null || !battle.IsBattle()) return;
+            if (aiTest > 0) KeepBattleMoving(battle, !(Settings.TryGetValue("aiauto", out var av0) && av0 == "0"));   // from its first frame: a boss's opening hit
             if (battle.GetPlayerUnits()?.Length > 0 && battle.GetEnemyUnits()?.Length > 0 && now - stepSince >= 5 && battleCheck)
             {
                 Go(Step.Win);
+                return;
+            }
+            if (battle.GetPlayerUnits()?.Length > 0 && battle.GetEnemyUnits()?.Length > 0 && now - stepSince >= 5 && aiTest > 0)
+            {
+                // Active: in Wait mode the party's open command menus (nobody answers them) stop time,
+                // and the monsters never get a turn (WC's self-test does the same; nothing is saved)
+                var cfg = UserDataManager.Instance()?.Config;
+                if (cfg != null) cfg.BattleModeIndex = 0;
+                aiKnocks = 0;
+                aiLast = now + 9;   // 15 s of turns before the first knockout
+                Go(Step.AiTest);
                 return;
             }
             if (battle.GetPlayerUnits()?.Length > 0 && battle.GetEnemyUnits()?.Length > 0 && now - stepSince >= 5)
@@ -591,6 +716,116 @@ namespace BraveNewWorld.PR
                 Prepare(battle);
                 Go(Step.Probing);
             }
+        }
+
+        // --- AI test (request "aitest=<knockouts>", instead of the probe) --------------------------------
+        // The formation's monsters run their BNW scripts (BnwEnemyAi, the kit's SnesAiHost: every turn and
+        // counter logged in a probe run); every 6 s the first enemy standing is brought to 0 HP the
+        // game's own way (SnesAiHost.KnockOut: its death check), up to <knockouts> times: a BNW boss is held
+        // at 0 for its counter script (an extra life, "everyone dies like a boss"), anyone else dies.
+        // a headless battle keeps going: Active mode (Wait stops time in the party's open menus), the party
+        // on auto, kept alive (WC's self-test does the same; nothing is saved)
+        static void KeepBattleMoving(BattlePlugManager battle, bool auto = true)
+        {
+            var cfg = UserDataManager.Instance()?.Config;
+            if (cfg != null && cfg.BattleModeIndex != 0) cfg.BattleModeIndex = 0;
+            var ui = Last.UI.BattleUIManager.Instance;
+            if (ui != null && ui.IsAuto() != auto) ui.SetIsAuto(auto);
+            foreach (var pu in battle.GetPlayerUnits())
+            {
+                var pr = pu?.BattleUnitDataInfo?.Parameter;
+                if (pr != null && pr.CurrentHP > 0 && pr.CurrentHP < 9999) { if (pr.BaseMaxHp < 9999) pr.BaseMaxHp = 9999; pr.CurrentHP = 9999; }
+            }
+        }
+
+        static bool aiStarted, aiWarped, aiSawEvent;
+        static float aiBusyLog, aiFreeSince = -1, aiWarpAt;
+        static int aiTest, aiKnocks;
+        static float aiLast, aiStateAt;
+
+        // where a battle stands: its phase, the act being staged, the stacked acts, everyone's ATB gauge
+        // and chant (why a headless test battle stops: 2026-11-19, one act then nothing)
+        static string BattleState(BattlePlugManager battle)
+        {
+            var sb = new StringBuilder();
+            try { sb.Append($"phase {Object.FindObjectOfType<BattleController>()?.stateMachine?.Current}"); } catch (Exception e) { sb.Append($"phase ? {e.GetType().Name}"); }
+            try
+            {
+                var ex = battle.BattleActExection;
+                var st = ex?.InStagingBattleActData;
+                sb.Append($"; staging {ex?.GetStatingAct()} (end {BattleUtility.IsStagingEnd()}, state {ex?.nowState})");
+                if (st != null) sb.Append($" act by {st.AttackUnitData?.GetOwnedCharacterData()?.Name ?? st.AttackUnitData?.TryCast<BattleEnemyData>()?.GetMonster()?.Id.ToString()} type {st.CurrentActType}");
+            }
+            catch (Exception e) { sb.Append($"; staging ? {e.GetType().Name}"); }
+            try
+            {
+                var prog = battle.BattleProgress?.TryCast<BattleProgressATB>();
+                sb.Append($"; stacked {battle.BattleProgress?.GetStackBattleActDatas()?.Count}");
+                if (prog != null)
+                {
+                    foreach (var u in battle.GetPlayerUnits())
+                        if (u != null) sb.Append($"; {u.GetOwnedCharacterData()?.Name} atb {prog.GetAtbGaugeByUnitData(u):0.##}{(prog.IsChantTimeActDataByUnit(u) ? " chanting" : "")}");
+                    foreach (var u in battle.GetEnemyUnits())
+                    {
+                        if (u == null) continue;
+                        var c = u.BattleUnitDataInfo?.ActSelectController?.TryCast<ActSelectEnemyController>();
+                        sb.Append($"; monster {u.GetMonster()?.Id} atb {prog.GetAtbGaugeByUnitData(u):0.##}{(prog.IsChantTimeActDataByUnit(u) ? " chanting" : "")}" +
+                                  $" (controller {(c == null ? u.BattleUnitDataInfo?.ActSelectController?.GetType().Name ?? "none" : "enemy")}" +
+                                  (c != null ? $", ready normal {c.IsReadyActNormal()} counter {c.IsReadyActCounter()} damaged {c.IsDamaged()}" : "") + ")");
+                    }
+                }
+            }
+            catch (Exception e) { sb.Append($"; atb ? {e.GetType().Name}: {e.Message}"); }
+            sb.Append($"; auto {Last.UI.BattleUIManager.Instance?.IsAuto()}; mode {UserDataManager.Instance()?.Config?.BattleModeIndex}");
+            try
+            {
+                var integ = Last.Interpreter.Integrator.Instance;
+                sb.Append($"; event script {(integ != null && integ.IsMainCoreAlive() ? integ.scriptName : "none")}");
+            }
+            catch (Exception e) { sb.Append($"; event script ? {e.GetType().Name}"); }
+            try
+            {
+                // which monster AI scripts the game holds (ResourceManager's loaded assets)
+                var dic = ResourceManager.Instance?.completeAssetDic;
+                var ai = new List<string>();
+                if (dic != null) foreach (var k in dic.Keys) if (k != null && k.Contains("sc_ai_")) ai.Add(k.Replace('\\', '/').Split('/').Last());
+                sb.Append($"; AI scripts loaded {ai.Count}: {string.Join(" ", ai.Take(8))}");
+            }
+            catch (Exception e) { sb.Append($"; AI scripts ? {e.GetType().Name}"); }
+            return sb.ToString();
+        }
+
+        static void StepAiTest(float now)
+        {
+            var battle = BattlePlugManager.Instance();
+            if (battle == null || !battle.IsBattle())
+            {
+                Finish($"AI test: the battle ended after {aiKnocks} knockouts");
+                return;
+            }
+            // the party on auto (an open command menu stops time: WC's self-test does the same), kept alive
+            KeepBattleMoving(battle, !(Settings.TryGetValue("aiauto", out var av) && av == "0"));   // "aiauto=0": only monsters act
+            if (now - aiStateAt >= 2.5f)
+            {
+                aiStateAt = now;
+                Plugin.L.LogInfo($"[probe] AI test: battle state {BattleState(battle)}");
+            }
+            if (now - aiLast < 6) return;
+            aiLast = now;
+            string Units() => string.Join(", ", battle.GetEnemyUnits().Select(u => $"{u?.GetMonster()?.Id} (unique {u?.UniqueId}) {u?.BattleUnitDataInfo?.Parameter?.CurrentHP}/{u?.BattleUnitDataInfo?.Parameter?.ConfirmedMaxHp()}")) +
+                             " | party " + string.Join(", ", battle.GetPlayerUnits().Select(u => $"{u?.BattleUnitDataInfo?.Parameter?.CurrentHP}")) +
+                             $" | host: {PrKit.Ff6.SnesAiHost.ActsSeen} acts, {PrKit.Ff6.SnesAiHost.AiPasses} AI passes, {PrKit.Ff6.SnesAiHost.Turns} turns, {PrKit.Ff6.SnesAiHost.Counters} counters, {PrKit.Ff6.SnesAiHost.Finals} deaths";
+            if (aiKnocks >= aiTest)
+            {
+                Plugin.L.LogInfo($"[probe] AI test: enemies {Units()}");
+                Finish($"AI test: {aiKnocks} knockouts done, the battle goes on");
+                return;
+            }
+            var target = battle.GetEnemyUnits().FirstOrDefault(u => u?.BattleUnitDataInfo?.Parameter?.CurrentHP > 0);
+            if (target == null) return;
+            aiKnocks++;
+            Plugin.L.LogInfo($"[probe] AI test: knockout {aiKnocks}: enemies {Units()}");
+            Plugin.L.LogInfo($"[probe] AI test: knockout {aiKnocks}: {PrKit.Ff6.SnesAiHost.KnockOut(target)}");
         }
 
         internal static void Quit(string why) => Finish(why);

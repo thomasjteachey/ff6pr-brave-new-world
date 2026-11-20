@@ -263,10 +263,20 @@ class AiScripts(unittest.TestCase):
                 return set()
             return {line.split("	", 1)[0] for line in open(path, encoding="utf-8").read().splitlines() if "	" in line}
         mod_lines, mod_speakers = text_keys("story_mes_en.txt"), text_keys("story_cha_en.txt")
+        sys.path.insert(0, os.path.join(PR, "tools"))
+        import port_ai
+        shim_rows = [m["mnemonic"] for m in port_ai.shim_script(1)]
         for path in compiled_scripts():
             name = os.path.basename(path)
             doc = json.load(open(path, encoding="utf-8"))
             ms = doc["Mnemonics"]
+            # a monster the plugin runs (the kit's SnesAiHost): the shim, whose marker rows are left
+            # unpadded on purpose (they work in game: WC since 11-12, BNW since 11-19)
+            if any(m["mnemonic"] == "LoopAct" and port_ai.MARK_TURN in m["operands"]["iValues"] for m in ms):
+                with self.subTest(script=name):
+                    self.assertEqual([m["mnemonic"] for m in ms], shim_rows, "the plugin's shim layout")
+                    self.assertEqual(doc["Segments"][0]["Count"], len(ms))
+                continue
             with self.subTest(script=name):
                 self.assertEqual(set(doc), R.top_keys)
                 self.assertEqual(doc["Segments"][0]["Count"], len(ms))
@@ -398,6 +408,10 @@ class Encounters(unittest.TestCase):
 class AiAbilityNames(unittest.TestCase):
     def test_every_ai_ability_has_a_name(self):
         named = {int(r["type_value"]) for r in merged("content") if r["type_id"] == "4"}
+        # the plugin shim's markers are never acted as themselves (SnesAiHost rewrites those rows)
+        sys.path.insert(0, os.path.join(PR, "tools"))
+        import port_ai
+        named |= {port_ai.MARK_TURN, port_ai.MARK_COUNTER, port_ai.MARK_FINAL}
         missing = Counter()
         for path in compiled_scripts():
             for m in json.load(open(path, encoding="utf-8"))["Mnemonics"]:
@@ -849,12 +863,34 @@ class BnwFidelity(unittest.TestCase):
                     out[m["mnemonic"]] |= set(m["operands"]["iValues"] if m["mnemonic"] != "ActForTarget" else m["operands"]["iValues"][2:3])
             return out
 
-        shell, head = acts(257), acts(309)
-        self.assertEqual(shell["CounterAct"], {320}, "the shell counters with Discharge")
-        self.assertEqual(shell["Act"] - {1}, {696}, "the shell idles (attacks only when confused)")
-        self.assertFalse(shell["ActForTarget"], "the shell doesn't hide or show the head")
-        self.assertEqual(head["FinalAttackAct"], {735}, "the head's death ends the fight")
-        self.assertEqual(head["Act"], {1})
+        # a part the plugin runs (bnw_data.json's snes_ai, the kit's SnesAiHost) is checked in its BNW
+        # script: the plugin runs exactly that
+        sa = json.load(open(os.path.join(MOD, "bnw_data.json"), encoding="utf-8")).get("snes_ai") or {}
+        plugin = set(sa.get("plugin", []))
+
+        def snes(e):
+            sys.path.insert(0, os.path.join(PR, "tools"))
+            import snes_ai as A
+            return A.parse(bytes.fromhex(sa["scripts"][str(e)]), 0)
+
+        if 256 in plugin:
+            main, counter = snes(256)
+            self.assertIn(("attack", (0xB7,)), counter, "the shell counters with Discharge")
+            self.assertEqual(sa["attacks"][0xB7], 320, "Discharge is PR 320")
+        else:
+            shell = acts(257)
+            self.assertEqual(shell["CounterAct"], {320}, "the shell counters with Discharge")
+            self.assertEqual(shell["Act"] - {1}, {696}, "the shell idles (attacks only when confused)")
+            self.assertFalse(shell["ActForTarget"], "the shell doesn't hide or show the head")
+        if 308 in plugin:
+            main, counter = snes(308)
+            self.assertEqual(counter[:2], [("if", (0x06, 0x36, 0x00)), ("enemies", (0x0C, 0x05, 0xFF))],
+                             "the head at 0 HP: everyone dies like a boss (its death ends the fight)")
+            self.assertIn(308, sa.get("boss_death", []), "the head dies only through that script (BNW's boss flag)")
+        else:
+            head = acts(309)
+            self.assertEqual(head["FinalAttackAct"], {735}, "the head's death ends the fight")
+            self.assertEqual(head["Act"], {1})
 
     def test_magitek_moves_stay(self):
         """The Magitek command lists ability group 7 (the PR's 8 Magitek moves, type 604). BNW used
