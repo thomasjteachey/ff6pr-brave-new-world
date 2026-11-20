@@ -104,7 +104,8 @@ namespace BraveNewWorld.PR
                 dict[Marker] = script;
                 appliedScript = script;
                 Plugin.L.LogInfo($"[dialogue] {(script == "pr" ? "the game's own text" : script == "vnw" ? "Vanilla New World" : "Brave New World")}: {Applied} story lines; " +
-                                 $"E0001_03_020_a_05 = '{msg.GetMessage("E0001_03_020_a_05", false)}'");
+                                 $"E0001_03_020_a_05 = '{msg.GetMessage("E0001_03_020_a_05", false)}'; the opening's first lines = " +
+                                 $"'{msg.GetMessage("E0001_00_020_a_01", false)?.Replace("\n", "|")}'");
             }
             catch (Exception e) { PrKit.Hooks.WarnOnce("dialogue", e); }
         }
@@ -139,7 +140,18 @@ namespace BraveNewWorld.PR
             var brk = Break.Match(pr);
             string nl = pr.Contains("\\n") ? "\\n" : "\n";
             string sep = brk.Success ? brk.Groups[1].Value + brk.Groups[2].Value : "<P>" + nl;
-            return string.Join(sep, pages) + (tail.Success ? tail.Groups[1].Value : "");
+            // a page's own line breaks (centered narration, letters, the opera's lyrics) in the line's
+            // form; a centered line (<CT>) centers each of them
+            bool centered = pr.StartsWith("<CT>");
+            var parts = new string[pages.Length];
+            for (int i = 0; i < pages.Length; i++)
+            {
+                var rows = pages[i].Split('\n');
+                if (centered)
+                    for (int r = 0; r < rows.Length; r++) rows[r] = "<CT>" + rows[r];
+                parts[i] = string.Join(nl, rows);
+            }
+            return string.Join(sep, parts) + (tail.Success ? tail.Groups[1].Value : "");
         }
     }
 }

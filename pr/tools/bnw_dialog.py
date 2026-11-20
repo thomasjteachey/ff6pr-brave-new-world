@@ -23,6 +23,7 @@ import json
 import os
 import re
 import sys
+import textwrap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -59,25 +60,82 @@ def turns(caption):
     return out
 
 
-def convert(turn):
-    """One BNW turn as PR text (None: nothing to show)."""
+def convert(turn, mode="plain"):
+    """One BNW turn as PR text (None: nothing to show). mode "plain": one paragraph (the PR wraps
+    it); "lines": BNW's line breaks kept, indents dropped (centered narration: the plugin centers
+    each line); "formatted": line breaks kept, an indented line as the PR's (FULL_SPACE) indent, the
+    SNES's waits (<E$hh>) as the PR's <WAIThh> (letters, the opera's lyrics: the PR kept the SNES's
+    timing values, so the singing stays with the music)."""
     s = turn
     if "<I>" in s or re.match(r"\s*(Got|Received|Found|Obtained)\b", s):
         return None
     if "<C>" in s:
         s = s.split("<C>")[0]
-    s = SPEAKER.sub("", s.strip())
+    s = SPEAKER.sub("", s.strip("\n") if mode == "formatted" else s.strip())
     if re.search(r"[\\{}|^£]|\$(?![0-9A-F]{2}>)", s):
         return None   # SNES button glyphs (a controls tutorial): the PR's own lines show its controls
     s = re.sub(r"<A(\d+)>", lambda m: NAMES[int(m.group(1))] if int(m.group(1)) < len(NAMES) else "", s)
     s = s.replace("<$75>", "♪").replace("<P>", " ")   # <P>: a battle message's pause
-    s = re.sub(r"<D>", " ", s)
+    if mode == "formatted":
+        s = re.sub(r"<E\$([0-9A-F]{2})[A-E]?>", lambda m: f"<WAIT{m.group(1).lower()}>", s)
+        s = s.replace("<D>", "")
+    else:
+        s = s.replace("<D>", " ")
     s = re.sub(r"<D\d+>|<E\$[0-9A-F]+[A-E]?>|<OP\$[0-9A-F]+>|<\$[0-9A-F]+>", "", s)
     s = s.replace("_", "...")
     s = s.replace("[", '"').replace("]", '"')   # BNW's font shows these as quotation marks
-    s = re.sub(r"\s*\n\s*", " ", s)
-    s = re.sub(r" {2,}", " ", s).strip()
+    if mode == "plain":
+        s = re.sub(r"\s*\n\s*", " ", s)
+        s = re.sub(r" {2,}", " ", s).strip()
+    elif mode == "lines":
+        rows = [re.sub(r" {2,}", " ", r).strip() for r in s.split("\n")]
+        rows = [r for r in rows if r]
+        if len(rows) == 1 and len(rows[0]) > 36:
+            rows = textwrap.wrap(rows[0], 34)
+        s = "\n".join(rows)
+    else:
+        rows = []
+        for r in s.split("\n"):
+            if not r.strip():
+                continue
+            indent = len(r) - len(r.lstrip(" "))
+            t = re.sub(r" {2,}", " ", r.strip())
+            rows.append(("(FULL_SPACE)(FULL_SPACE)" if indent >= 2 and rows else "") + t)
+        s = re.sub(r"(<WAIT[0-9a-f]+>)+$", "", "\n".join(rows))   # the PR line's own end wait follows
     return s or None
+
+
+def mode_of(pr):
+    """How a PR line takes BNW's text: None = it stays the PR's."""
+    if "(ITEM_N)" in pr or "(NUM)" in pr:
+        return None
+    if "<CT>" in pr:
+        if pr.startswith("<CT>Obtained"):
+            return "obtained"
+        plain = re.sub(r"<[^>]*>|\([A-Z_]+\)|\\n", " ", pr)
+        return "lines" if len(re.findall(r"[A-Za-z]", plain)) >= 35 else None
+    if re.search(r"<WAIT[0-9a-f]+>\\n", pr):
+        return "lyrics"
+    if "(FULL_SPACE)" in pr:
+        return "formatted"
+    return "plain"
+
+
+def obtained(pr, caption):
+    """An esper's "Obtained X magicite!": BNW's name for it (the menus show BNW's names); items stay
+    the PR's (the PR's script gives its own item)."""
+    m = re.search(r"magicite \[([^\]]+)\]", caption)
+    if "magicite" not in pr or not m:
+        return None
+    return [f"Obtained {m.group(1).strip()} magicite!"]
+
+
+def choices(caption):
+    """BNW's choice options in order (converted), or None."""
+    if "<C>" not in caption:
+        return None
+    opts = [convert(o.strip()) for o in caption.split("<C>")[1:]]
+    return opts if all(opts) else None
 
 
 TAG_NAME = {"(TINA)": "terra", "(ROCK)": "locke", "(KAIEN)": "cyan", "(SHADOW)": "shadow", "(EDGAR)": "edgar",
@@ -230,8 +288,19 @@ def build(rebuild_map=False):
     pre = M.pr_lines("en")
     # kept as the PR has them: centered narration, item/number lines, names, and timed lines (the
     # opera's lyrics: <WAITnn> then a new line, (FULL_SPACE) indents)
-    skip = {k for k, v in pre.items() if "<CT>" in v or "(ITEM_N)" in v or "(NUM)" in v or k.startswith("SPEAKER")
-            or "(FULL_SPACE)" in v or re.search(r"<WAIT[0-9a-f]+>\\n", v)}
+    mode = {k: (None if k.startswith("SPEAKER") else mode_of(v)) for k, v in pre.items()}
+    # the opera stays the PR's: its singing is voiced (the user, 2026-11-20: "don't change the maria
+    # song please ... it is voiced, so it would be weird if it were different"): every sung line (♪),
+    # and any line or choice that quotes the lyrics (Celes's script, "(O my hero...)" on stage)
+    def norm(t):
+        return " ".join(re.findall(r"[a-z']+", re.sub(r"<[^>]*>|\([A-Z_]+\)|\\n", " ", t).lower()))
+    lyric = {norm(r) for v in pre.values() if "♪" in v for r in re.split(r"\\n", v) if len(norm(r).split()) >= 3}
+    for k, v in pre.items():
+        rows = [norm(r) for r in re.split(r"\\n", v)]
+        if "♪" in v or any(r in lyric for r in rows if r) or \
+                (k.split("_")[-2:-1] == ["c"] and len(norm(v)) >= 8 and any(l.startswith(norm(v)) for l in lyric)):
+            mode[k] = None
+    option = {k for k in pre if re.search(r"_c_\d+$", k)}   # choice options: from BNW's choices below
     cha = {}
     for line in open(f"{P.MESSAGE}/story_cha_en.txt", encoding="utf-8").read().splitlines():
         if "	" in line:
@@ -239,7 +308,7 @@ def build(rebuild_map=False):
             cha[k] = speaker_key(v)
     by_dlg = collections.defaultdict(list)
     for k, (d, a, b, score, how) in dmap.items():
-        if k in pre and k not in skip:
+        if k in pre and mode.get(k) and k not in option:
             by_dlg[d].append((a, b, k))
     result, stats = {}, {}
     for name, rel in SCRIPTS.items():
@@ -258,12 +327,53 @@ def build(rebuild_map=False):
             for key in keys:
                 scenes[M.scene(key[2])].append(key)
             for group in scenes.values():
+                for a, b, k in [key for key in group if mode[key[2]] == "obtained"]:
+                    got = obtained(pre[k], caps.get(d, ""))
+                    if got:
+                        lines[k] = got
+                        st["obtained"] += 1
+                group = [key for key in group if mode[key[2]] != "obtained"]
+                if not group:
+                    continue
                 for k, idx in distribute(group, jp[d], bt, cha, pre).items():
-                    pages = [p for p in (convert(bt[j]) for j in idx) if p]
+                    m = mode[k]
+                    if m == "lyrics":
+                        # sung lines only from BNW's own timed version (its <E$hh> waits)
+                        if not any("<E$" in bt[j] for j in idx):
+                            continue
+                        m = "formatted"
+                    pages = [p for p in (convert(bt[j], m) for j in idx) if p]
+                    if pages and mode[k] == "lyrics":
+                        # the PR sings two lines a box, each box turned by its own timed page break
+                        rows = [r for p in pages for r in p.split("\n")]
+                        pages = ["\n".join(rows[i:i + 2]) for i in range(0, len(rows), 2)]
+                        pages = [re.sub(r"^(\(FULL_SPACE\))+", "", p) for p in pages]
                     if pages:
                         lines[k] = pages
+                        if m != "plain":
+                            st[m] += 1
                     else:
                         st["key without text"] += 1
+        # choice options: each PR option group (_c_NN after its question) from the BNW choice in
+        # its question's dialogue, when they have as many options
+        stem_dlg = collections.defaultdict(set)
+        for k, (d, a, b, score, how) in dmap.items():
+            if k in pre and k not in option:
+                stem_dlg["_".join(k.split("_")[:3])].add(d)
+        groups = collections.defaultdict(list)
+        for k in option:
+            groups[k.rsplit("_", 1)[0]].append(k)
+        for g, ks in groups.items():
+            ks.sort()
+            if any(mode.get(k) is None for k in ks):
+                continue   # an option that quotes the opera's lyrics: the PR's choice stays
+            for d in sorted(stem_dlg.get("_".join(ks[0].split("_")[:3]), ())):
+                opts = choices(caps.get(d, ""))
+                if opts and len(opts) == len(ks):
+                    for k, o in zip(ks, opts):
+                        lines[k] = [o]
+                    st["choice options"] += len(ks)
+                    break
         result[name] = lines
         st["lines"] = len(lines)
         stats[name] = dict(st)

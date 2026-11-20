@@ -1019,18 +1019,25 @@ class Dialogue(unittest.TestCase):
                 self.assertIn(k, self.pr, k)
                 self.assertFalse(k.startswith("SPEAKER"), k)
                 pr = self.pr[k]
-                self.assertNotIn("<CT>", pr, f"{k}: centered narration stays the PR's")
-                self.assertNotIn("(FULL_SPACE)", pr, f"{k}: timed lines stay the PR's")
+                # the opera stays the PR's: its singing is voiced (the user, 2026-11-20)
+                self.assertNotIn("♪", pr, f"{k}: a sung line got BNW's text")
                 for page in pages:
                     self.assertTrue(page.strip(), k)
-                    self.assertIsNone(re.search(r"<(?!WAIT|AUTO_P|PRESS|P>)[^>]*>", page), f"{k}: {page}")
-                    self.assertIsNone(re.search(r"[\{}|^£_]", page), f"{k}: SNES glyph left: {page}")
-                    self.assertLessEqual(len(page), 240, k)
+                    self.assertIsNone(re.search(r"<(?!WAIT[0-9a-f]{2}>)[^>]*>", page), f"{k}: {page}")
+                    plain = re.sub(r"<WAIT[0-9a-f]{2}>|\(FULL_SPACE\)", "", page)
+                    self.assertIsNone(re.search(r"[\\{}|^£_]", plain), f"{k}: SNES glyph left: {page}")
+                    self.assertLessEqual(max(len(r) for r in plain.split("\n")), 240, k)
 
     def test_known_lines(self):
         bnw, vnw = self.data["bnw"], self.data["vnw"]
         # dialogue 2 (Wedge: "Probably, judging from the urgency of our orders.") is E0001_03_020_a_05
         self.assertEqual(bnw.get("E0001_03_020_a_05"), ["Probably, judging from the urgency of our orders."])
+        # the opening crawl: BNW's, a line each (the plugin centers them as the PR's <CT> lines)
+        self.assertEqual(bnw.get("E0001_00_020_a_01", [""])[0].split("\n")[0], "Long ago, the War of the Magi")
+        # an esper by BNW's name, as its menus show it; a choice from BNW's; the opera untouched
+        self.assertTrue(any("magicite!" in p for k, v in bnw.items() for p in v if p.startswith("Obtained Tritoch")))
+        self.assertEqual(bnw.get("E0082_00_050_c_01"), ["(Take it)"])
+        self.assertNotIn("E0137_00_113_a_02", bnw, "Celes's script quotes the voiced aria: the PR's")
         # Mog's fourth-wall joke in BNW, which Vanilla New World leaves out
         self.assertIn("get me earlier", " ".join(bnw.get("E0438_00_020_a_02", [])))
         self.assertIn("Don't scare me", " ".join(vnw.get("E0438_00_020_a_02", [])))
