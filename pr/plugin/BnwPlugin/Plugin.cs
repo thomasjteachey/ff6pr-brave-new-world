@@ -81,6 +81,12 @@ namespace BraveNewWorld.PR
             var natb = Config.Bind("Battle", "nATB", false,
                 "Extra nATB stop (off: the Pixel Remaster already stops ATB, charging and status timers while an " +
                 "action is staged, BattleProgressATB.Update; this also stops them in the action's prepare/after phases).");
+            var encounterRates = Config.Bind("Field", "EncounterRates", true,
+                "Random battles come at BNW's SNES rates: its danger counter per map and world zone, at least ~10 steps " +
+                "between battles in most places, its party odds, the Mystery Egg halving them and Dirty Undies stopping them " +
+                "(off: the Pixel Remaster's own step counter, ~38 steps a battle everywhere).");
+            var randomEncounters = Config.Bind("Field", "RandomEncounters", true,
+                "Random battles on (the in-game Config menu's Encounters row, madsiur's BNW option; with EncounterRates on).");
             var damageLog = Config.Bind("Testing", "DamageLog", true,
                 "Write every damage/heal result with its inputs to BepInEx/bnw_damage.csv (for porting BNW's formulas).");
             var testKit = Config.Bind("Testing", "TestKit", false,
@@ -167,6 +173,7 @@ namespace BraveNewWorld.PR
             EsperList.Apply(harmony);
             EsperLevelDisplay.Apply(harmony);
             BnwEnemyAi.Apply(harmony, dataPath);   // no switch: the port gives these monsters only the plugin's shim
+            if (encounterRates.Value) BnwEncounters.Apply(harmony, dataPath, randomEncounters);
             FormulaProbe.Init(harmony);  // only when BepInEx/bnw_probe.request exists
             AddComponent<BnwRunner>();
             L.LogInfo($"Brave New World PR plugin loaded: {EsperHooks.D.Espers.Count} espers, " +

@@ -124,6 +124,11 @@ class BraveNewWorld(Profile):
         sa = getattr(port_ai.port, "snes_ai", None)
         if sa is not None and self.snes_ai:
             data["snes_ai"] = sa   # the plugin's SnesAiHost runs these (BnwEnemyAi.cs)
+        # BNW's random-battle rates for the kit's SnesEncounters (BnwEncounters.cs): its rate codes,
+        # its battle roll (4-236: at least ~10 steps between battles), its party odds (also the sets' weights)
+        import port_encounter_rates
+        import prdata
+        data["encounters"] = port_encounter_rates.rules(ff6snes.Rom(prdata.VANILLA_ROM), rom, "bnw")
         return {"bnw_data.json": data}
 
     def extra_messages(self, rom):

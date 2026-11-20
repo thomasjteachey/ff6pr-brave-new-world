@@ -404,6 +404,59 @@ class Encounters(unittest.TestCase):
                 used = [k for k in range(1, 10) if r[f"monster{k}"] != "0"]
                 self.assertTrue(1 <= len(used) <= 9, r["id"])
 
+    def bnw_rom(self):
+        if MOD_NAME != "BraveNewWorld":
+            self.skipTest("BNW's encounter rates")
+        import ff6snes as SN
+        import profiles
+        path = profiles.PROFILES["bnw"].rom
+        if not os.path.exists(path):
+            self.skipTest("no BNW ROM")
+        return SN.Rom(path)
+
+    def test_encounter_rates_from_bnw_rom(self):
+        """bnw_data.json's encounters (the plugin's BnwEncounters / the kit's SnesEncounters): BNW's world
+        zone codes byte for byte, its battle roll 4 + random x 233 / 256 (C0/C48C), vanilla's rate tables
+        (C0/C29F, C0/C2BF: BNW keeps them), its party odds 80/80/48/48 (C0/C258, C0/C3F1), and the PR sets
+        of maps where BNW turned random battles off (Figaro's engine room, the IMTRF's Ifrit/Shiva room,
+        Gogo's room) at no battles."""
+        rom = self.bnw_rom()
+        e = json.load(open(os.path.join(MOD, "bnw_data.json"), encoding="utf-8")).get("encounters")
+        self.assertIsNotNone(e, "bnw_data.json has encounters")
+        self.assertEqual(e["roll"], {"add": 4, "range": 233})
+        self.assertEqual(e["world_zones"]["1"], list(rom.data[0xF5800:0xF5840]))
+        self.assertEqual(e["world_zones"]["2"], list(rom.data[0xF5840:0xF5880]))
+        self.assertEqual(e["world_rates"], [0xC0, 0x60, 0x180, 0, 0x60, 0x30, 0xC0, 0] + [0] * 8)
+        self.assertEqual(e["map_rates"], [0x70, 0x40, 0x160, 0x200, 0x38, 0x20, 0xB0, 0x100] + [0] * 8)
+        self.assertEqual(e["party_odds"], {"world": [80, 80, 48, 48], "map": [80, 80, 48, 48]})
+        maps = {int(r["id"]): int(r["monster_set_id"]) for r in P.Table("map")}
+        for pr_map in (440, 398, 507):   # SNES maps 64, 264, 278: "Randoms Off" in BNW's map edits
+            self.assertEqual(e["set_codes"].get(str(maps[pr_map])), -1, f"PR map {pr_map}")
+        # the World of Balance's grass/forest/desert grounds and the World of Ruin's fourth group
+        self.assertEqual({k: e["foot_group"]["1"][k] for k in ("4", "9", "15")}, {"4": 0, "9": 1, "15": 2})
+        self.assertEqual(e["foot_group"]["2"]["6"], 3)
+
+    def test_random_sets_have_bnw_party_odds(self):
+        """Every PR set random battles use (maps' and world areas') that the mod writes holds 4 parties at
+        BNW's 80/80/48/48; none keeps vanilla's 80/80/80/16 where BNW's pack is used."""
+        self.bnw_rom()
+        sets = merged("monster_set")
+        used = {int(r["monster_set_id"]) for r in P.Table("map")} | \
+            {int(r[c]) for r in P.Table("encount_area") for c in r if c.endswith("_monster_set")}
+        odds = Counter()
+        for sid in used:
+            r = sets.rows.get(sid)
+            if r and all(int(r[f"monster_set{k}"]) for k in range(1, 5)):
+                odds[tuple(int(r[f"monster_set{k}_rate"]) for k in range(1, 5))] += 1
+        self.assertEqual(set(odds), {(80, 80, 48, 48)}, odds)
+
+    def test_no_pr_set_keeps_vanilla_for_bnw_pack_zero(self):
+        """A place BNW gives its empty pack 0 has no battles there: it doesn't outvote the pack BNW uses
+        at the set's other places (Narshe's mines, set 137, had kept vanilla's monsters)."""
+        self.bnw_rom()
+        r = merged("monster_set").rows[137]
+        self.assertTrue(all(int(r[f"monster_set{k}"]) >= 2000 for k in range(1, 5)), r)
+
 
 class AiAbilityNames(unittest.TestCase):
     def test_every_ai_ability_has_a_name(self):
