@@ -31,9 +31,17 @@ PARTS = [
 README = """# Brave New World for FINAL FANTASY VI Pixel Remaster
 
 Brave New World 3.0, the FF6 rebalance and
-redesign by Synchysi and its contributors, ported to the Steam Pixel Remaster. **In development,
-not released for players yet** (about 81% done: data, espers, most of the battle engine and
-enemy AI are in; dialogue and monster art are not).
+redesign by Synchysi and its contributors, ported to the Steam Pixel Remaster. **In development:
+preview builds are on the [Releases](https://github.com/thomasjteachey/ff6pr-brave-new-world/releases)
+page** (about 87% done: data, espers, the battle engine, BNW's enemy AI and its dialogue are in;
+BNW's monster art is not, and it hasn't had a full playthrough yet).
+
+## Playing it
+
+Download `BraveNewWorld-PR.zip` from the latest release and extract it into the game folder (next
+to `FINAL FANTASY VI.exe`). Needs BepInEx 6 (IL2CPP x64, bleeding edge, made with 6.0.0-be.697)
+and Magicite installed first; the zip's README has the details. Don't install it beside Worlds
+Collide, and start a new game.
 
 ## How it works
 
