@@ -82,6 +82,51 @@ namespace BraveNewWorld.PR
             return p.Clone();
         }
 
+        // BNW's own flags (bit 0: Julian's Schematics, Schematics.cs): marker "BNWF" + one word, after the
+        // character block (never inside it)
+        const int FlagsMarker = 0x424E5746;
+
+        static int FindFlags(Il2CppSystem.Collections.Generic.List<int> list)
+        {
+            int block = Find(list), n = list.Count;
+            for (int i = 0; i + 1 < n; i++)
+            {
+                if (block >= 0 && i >= block && i < block + BlockSize) continue;
+                if (list[i] == FlagsMarker) return i;
+            }
+            return -1;
+        }
+
+        public static int Flags
+        {
+            get
+            {
+                lock (Sync)
+                {
+                    var list = List();
+                    if (list == null) return 0;
+                    int at = FindFlags(list);
+                    return at < 0 ? 0 : list[at + 1];
+                }
+            }
+            set
+            {
+                lock (Sync)
+                {
+                    var list = List();
+                    if (list == null) return;
+                    int at = FindFlags(list);
+                    if (at < 0)
+                    {
+                        list.Add(FlagsMarker);
+                        list.Add(value);
+                        Plugin.L.LogInfo("[esper store] started BNW's flags in this save");
+                    }
+                    else list[at + 1] = value;
+                }
+            }
+        }
+
         public static bool Put(int statusId, EsperProgress p)
         {
             if (statusId < 1 || statusId > Characters) return false;

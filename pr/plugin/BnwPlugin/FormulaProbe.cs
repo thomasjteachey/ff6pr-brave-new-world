@@ -43,7 +43,7 @@ namespace BraveNewWorld.PR
         internal static bool Active;   // stat overrides answer (inside a probe call)
         internal static bool Running;  // a probe run is in progress
 
-        enum Step { Off, Title, Field, Battle, Probing, Shop, Learn, Win, NewGame, AiTest, Done }
+        enum Step { Off, Title, Field, Battle, Probing, Shop, Learn, Win, NewGame, AiTest, SelfTests, Done }
         static Step step = Step.Off;
         static float stepSince, startedAt, titleSince = -1, lastTry;
         static bool loadCalled;
@@ -51,6 +51,11 @@ namespace BraveNewWorld.PR
         static int loadTries;
         static int loadMap = -1;   // the loaded save's map (-1: a new game, any field)
         static int encounterTries;
+        // request "slot=new": a New Game from the title (the title's own command, asked again every 2.5 s until it
+        // takes it), then the probe battle on the opening's field. On this PC no save loads headless and "slot=party"
+        // ended in the title's idle demo ~74 s later (the same opening field, map 609): this gets there ~60 s sooner
+        // (tools/test_batch.py runs sweep=0 probes so, 2026-11-20)
+        static bool slotNew;
 
         static string requestPath, outPath;
         static readonly Dictionary<string, string> Settings = new Dictionary<string, string>();
@@ -73,10 +78,16 @@ namespace BraveNewWorld.PR
                 File.Delete(requestPath);  // one run only, even if this one fails
             }
             catch (Exception e) { Plugin.L.LogWarning($"[probe] request: {e.Message}"); }
+            // a test run (batch mode only): the opening logos skipped, ~13 s sooner at the title (the kit harness's)
+            PrKit.Harness.SkipLogosInTestRun(h);
             partyId = Int("party", partyId);
             weaponId = Int("weapon", weaponId);
             samples = Math.Max(1, Int("samples", samples));
             quit = Int("quit", 1) != 0;
+            sweep = Int("sweep", 1) != 0;
+            selfTestMax = Int("selftestmax", selfTestMax);
+            slotNew = Settings.TryGetValue("slot", out var slv) && slv == "new";
+            if (!sweep) Plugin.L.LogInfo($"[probe] self-tests only (no formula sweep), up to {selfTestMax} s in battle");
             if (Settings.TryGetValue("boxcheck", out var bx) && bx.Split(':').Length == 3)
             {
                 Settings["shopcheck"] = bx;
@@ -186,6 +197,7 @@ namespace BraveNewWorld.PR
                     case Step.Win: StepWin(now); break;
                     case Step.NewGame: StepNewGame(now); break;
                     case Step.AiTest: StepAiTest(now); break;
+                    case Step.SelfTests: StepSelfTests(now); break;
                 }
             }
             catch (Exception e) { Finish($"step {step} failed: {e}"); }
@@ -217,13 +229,16 @@ namespace BraveNewWorld.PR
                          Object.FindObjectOfType<Last.UI.Touch.TitleWindowController>() != null;
             // a load asked for while the title was still coming up does nothing: ask again (twice at most)
             if (loadCalled && !newGame && title && loadMap != -1 && !OnField() && now - loadAt > 40 && loadTries < 3) loadCalled = false;
+            // slot=new: New Game again while the title stays up (its intro ignores it)
+            if (loadCalled && slotNew && title && now - loadAt > 2.5f && loadTries < 40) loadCalled = false;
             if (mm == null || !mm.isInitialized || loadCalled) return;
             if (title && titleSince < 0) titleSince = now;
-            // load 12 s after the title shows (a load during its intro is ignored), or after 45 s anyway
-            if (!(title && now - titleSince >= 12) && now - startedAt < 45) return;
+            // load 12 s after the title shows (a load during its intro is ignored), or after 45 s anyway;
+            // slot=new asks as soon as the title shows (and again until it takes it)
+            if (!(title && (slotNew || now - titleSince >= 12)) && now - startedAt < 45) return;
             loadAt = now;
             loadTries++;
-            if (newGame)
+            if (newGame || slotNew)
             {
                 // the title's own New Game command (WcTest's way: TitleWindowController.SetCommand)
                 var tw = Object.FindObjectOfType<Last.UI.KeyInput.TitleWindowController>();
@@ -232,14 +247,34 @@ namespace BraveNewWorld.PR
                 if (tw == null || set == null) { Finish("new game: no title window / SetCommand"); return; }
                 var ps = set.GetParameters();
                 loadCalled = true;
-                Plugin.L.LogInfo("[probe] new game chosen");
+                Plugin.L.LogInfo($"[probe] new game chosen{(slotNew ? $" (slot=new, try {loadTries})" : "")}");
                 set.Invoke(tw, new object[] { Last.Defaine.TitleCommandId.NewGame, Enum.ToObject(ps[1].ParameterType, 2), false, true });
                 return;
             }
             var mgr = SaveSlotManager.Instance();
-            // request "slot=<n>": that save instead of the latest
+            // request "slot=<n>": that save instead of the latest; "slot=party": the latest save
+            // with at least 3 in its party (the battle self-tests need a party, not the opening's)
             bool pick = Settings.TryGetValue("slot", out var sv) && int.TryParse(sv, out var sn);
             var slot = pick ? mgr?.GetTargetSaveSlotData(int.Parse(sv)) : mgr?.GetLatestSaveSlotData(false, false);
+            if (!pick && sv == "party")
+            {
+                SaveSlotData best = null;
+                var all = mgr?.SaveSlotDataList;
+                var seen = new List<string>();
+                if (all != null)
+                    foreach (var sd in all)
+                    {
+                        if (sd == null || string.IsNullOrEmpty(sd.TimeStamp)) continue;
+                        int members = 0;
+                        if (sd.PartyList != null) foreach (var pc in sd.PartyList) if (pc != null) members++;
+                        seen.Add($"{sd.Id} {sd.TimeStamp} ({members}{(PrKit.ModSaves.IsWorldMap(PrKit.ModSaves.MapId(sd)) ? ", world map" : "")})");
+                    }
+                // the newest by time, not on a world map when another will do (PrKit ModSaves.NewestWithParty: a probe
+                // battle started on the world map after loading the PC's slot 11 ended with a second game, 2026-11-20)
+                best = PrKit.ModSaves.NewestWithParty(3);
+                Plugin.L.LogInfo($"[probe] saves: {string.Join(", ", seen)}");
+                if (best != null) { slot = best; pick = true; sv = best.Id.ToString(); }
+            }
             if (slot == null) { Finish(pick ? $"no save in slot {sv}" : "no save to load"); return; }
             loadCalled = true;
             Plugin.L.LogInfo(pick ? $"[probe] loading save {slot.Id} ({slot.TimeStamp})" : $"[probe] loading the latest save ({slot.Id}, {slot.TimeStamp})");
@@ -248,7 +283,16 @@ namespace BraveNewWorld.PR
             loadMap = mm2.Success ? int.Parse(mm2.Groups[1].Value) : -1;
             if (loadMap < 0) Plugin.L.LogWarning($"[probe] no map id in save {slot.Id}'s map data: any field will do ({(slot.mapData ?? "").Length} chars)");
             else Plugin.L.LogInfo($"[probe] save {slot.Id}'s map: {loadMap} (try {loadTries})");
-            mgr.GotoLoadSaveData(slot);
+            // at the title, the title's own load (PrKit ModSaves.LoadAtTitle: with its fade-out, the step every
+            // headless title load missed until 2026-11-20, when the in-game load did nothing there and ~74 s
+            // later the title's idle demo (map 609, Terra/Biggs/Wedge) passed for the loaded field); elsewhere
+            // the in-game load
+            var why = Object.FindObjectOfType<Last.UI.KeyInput.TitleWindowController>() != null ? PrKit.ModSaves.LoadAtTitle(slot) : "not at the title";
+            if (why != null)
+            {
+                Plugin.L.LogInfo($"[probe] title load: {why}; the in-game load instead");
+                mgr.GotoLoadSaveData(slot);
+            }
         }
 
         // --- no saves in a test run -------------------------------------------------------
@@ -713,9 +757,78 @@ namespace BraveNewWorld.PR
             if (battle.GetPlayerUnits()?.Length > 0 && battle.GetEnemyUnits()?.Length > 0 && now - stepSince >= 5)
             {
                 RelicRules.LogParty(battle);
+                if (!sweep) { Go(Step.SelfTests); return; }
                 Prepare(battle);
                 Go(Step.Probing);
             }
+        }
+
+        // --- battle self-tests (request "sweep=0": these only, no formula sweep) --------------------------
+        // One probe battle runs every session's in-battle checks: BnwRunner's chain (Plugin.cs: Veldt, grip,
+        // limits, Leap, cover, toss...) and the checks registered here. A check returns null until it can run
+        // (polled twice a second in the probe battle), then its result line (logged once; a line without a
+        // "[tag]" gets "[selftest] <name>: "). An exception is logged as a FAILED line with its stack head.
+        // With "sweep=0" the run quits once the chain and every registered check answered (or after
+        // "selftestmax" seconds, default 30 (120 until 2026-11-20: a check that answers does so within ~15 s
+        // of the battle, so the rest only held the run up), naming the checks still waiting); after a full sweep the
+        // checks still waiting get the same time before the run quits.
+        //     FormulaProbe.AddSelfTest("esper level-up", () => battleReady ? $"[esper] level-up self-test {(ok ? "ok" : "FAILED")}: ..." : null);
+        static readonly List<KeyValuePair<string, Func<string>>> selfTests = new List<KeyValuePair<string, Func<string>>>();
+        static readonly HashSet<string> selfTestsDone = new HashSet<string>();
+        static bool sweep = true;
+        static int selfTestMax = 30;
+        static float selfTestPoll, selfTestLog;
+        internal static bool BattleChainDone;   // BnwRunner's chain finished (Plugin.cs)
+
+        internal static void AddSelfTest(string name, Func<string> test)
+        {
+            if (string.IsNullOrEmpty(name) || test == null) return;
+            selfTests.RemoveAll(t => t.Key == name);
+            selfTests.Add(new KeyValuePair<string, Func<string>>(name, test));
+        }
+
+        static List<string> SelfTestsWaiting()
+        {
+            var waiting = new List<string>();
+            if (!BattleChainDone) waiting.Add("BnwRunner chain (Plugin.cs)");
+            foreach (var t in selfTests) if (!selfTestsDone.Contains(t.Key)) waiting.Add(t.Key);
+            return waiting;
+        }
+
+        static void RunSelfTests(float now)
+        {
+            if (now - selfTestPoll < 0.5f) return;
+            selfTestPoll = now;
+            foreach (var t in selfTests.ToArray())
+            {
+                if (selfTestsDone.Contains(t.Key)) continue;
+                string line;
+                try { line = t.Value(); }
+                catch (Exception e)
+                {
+                    var head = string.Join(" | ", (e.StackTrace ?? "").Split('\n').Take(3).Select(s => s.Trim()));
+                    line = $"[selftest] {t.Key}: FAILED: {e.GetType().Name}: {e.Message} at {head}";
+                }
+                if (line == null) continue;
+                selfTestsDone.Add(t.Key);
+                Plugin.L.LogInfo(line.StartsWith("[") ? line : $"[selftest] {t.Key}: {line}");
+            }
+        }
+
+        static void StepSelfTests(float now)
+        {
+            var battle = BattlePlugManager.Instance();
+            if (battle == null || !battle.IsBattle()) { Finish($"the battle ended during the self-tests (waiting for: {string.Join(", ", SelfTestsWaiting())})"); return; }
+            KeepAlive(battle, sturdy: true);
+            RunSelfTests(now);
+            var waiting = SelfTestsWaiting();
+            if (waiting.Count == 0) { Finish($"self-tests done ({selfTests.Count} registered + the BnwRunner chain, {now - stepSince:0} s)"); return; }
+            if (now - selfTestLog >= 15)
+            {
+                selfTestLog = now;
+                Plugin.L.LogInfo($"[probe] self-tests: {now - stepSince:0} s, waiting for: {string.Join(", ", waiting)}");
+            }
+            if (now - stepSince > selfTestMax) Finish($"self-tests timed out after {selfTestMax} s, waiting for: {string.Join(", ", waiting)}");
         }
 
         // --- AI test (request "aitest=<knockouts>", instead of the probe) --------------------------------
@@ -1155,14 +1268,29 @@ namespace BraveNewWorld.PR
             int done = jobsTotal - jobs.Count;
             if (done % 200 < 2 || jobs.Count == 0)
                 Plugin.L.LogInfo($"[probe] {done}/{jobsTotal} ({calls} calls, {errors} errors)");
-            if (jobs.Count == 0) Finish($"wrote {outPath}");
+            if (jobs.Count == 0)
+            {
+                if (SelfTestsWaiting().Count == 0) { Finish($"wrote {outPath}"); return; }
+                // the registered self-tests still waiting get their time in the same battle (StepSelfTests)
+                try { file?.Flush(); file?.Close(); } catch { }
+                file = null;
+                Plugin.L.LogInfo($"[probe] wrote {outPath}; self-tests next");
+                Go(Step.SelfTests);
+            }
         }
 
         // nobody dies while the probe runs between frames
-        static void KeepAlive(BattlePlugManager battle)
+        // sturdy (the self-tests' battle): the enemies' max HP raised to 9999 first, so one hit on the party's auto can't
+        // end the battle between two heals (QA bnw-atb4 09:52: monster 24's 50 HP died at once, every battle test waited)
+        static void KeepAlive(BattlePlugManager battle, bool sturdy = false)
         {
             foreach (var u in battle.GetPlayerUnits()) Heal(u);
-            foreach (var u in battle.GetEnemyUnits()) Heal(u);
+            foreach (var u in battle.GetEnemyUnits())
+            {
+                var p = u?.BattleUnitDataInfo?.Parameter;
+                if (sturdy && p != null && p.CurrentHP > 0 && p.BaseMaxHp < 9999) p.BaseMaxHp = 9999;
+                Heal(u);
+            }
         }
 
         static void Heal(BattleUnitData u)

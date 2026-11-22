@@ -88,6 +88,13 @@ def plugin_data(rom):
         "umaro": {"columns": [1, 201, 199, 200],
                   "rows": [list(rom.b(0x025269 + 4 * r, 4)) for r in range(4)],
                   "vanilla_rows": [list(van.b(0x025269 + 4 * r, 4)) for r in range(4)]},
+        # the Coliseum (BNW changed all 255 wagers): the kit's PrKit/Ff6/SnesColiseum answers the
+        # PR's lookups from these rows
+        "coliseum": coliseum(van, rom),
+        # Suplex misses these (SNES monster byte $13 bit 2; BNW's own 84, vanilla 159): PR monster
+        # ids, the Coliseum's copies of them too (the kit's PrKit/Ff6/SnesSuplex)
+        "no_suplex": no_suplex(rom),
+        "die_at_zero_mp": die_at_zero_mp(rom),
         # weapons that allow Runic / Bushido (SNES weapon byte 19 bit 7 / bit 1; the PR's
         # hard-coded BlockMagicSwordData / KillingSwordData .ValidWeaponContentId are exactly
         # vanilla's): weapon content ids
@@ -107,7 +114,35 @@ def plugin_data(rom):
     }
 
 
-BONUS_KEY = "MSG_BNW_ESPER_BONUS_{:02d}"  # the plugin returns these from MagicStoneData.GetMagicBonusMessageId
+def coliseum(van, rom):
+    """BNW's Coliseum rows for the kit's SnesColiseum (seed_info.coliseum's format: [wager content,
+    vanilla party, vanilla reward, party, reward, hidden, monster]). BNW's byte 3 is the bet's tile
+    (reversible_bets.asm: $D5 arrow, $C7 trade loop) and $00 hides the reward (vanilla: $FF)."""
+    import seed_info
+    return seed_info.coliseum(van, rom, hidden=lambda b: b == 0)
+
+
+def no_suplex(rom):
+    """PR monster ids Suplex misses: BNW's monsters with "can't be suplexed" (byte $13 bit 2) and the
+    PR's Coliseum copies of them (port.monster_copies)."""
+    import port
+    ids = {M.monster(e.id) for e in S.enemies(rom) if e.raw[19] & 4}
+    ids.discard(None)
+    ids |= {c for c, j in port.monster_copies().items() if j in ids}
+    return sorted(ids)
+
+
+def die_at_zero_mp(rom):
+    """PR monster ids that die when their MP reaches 0: BNW's "dies if MP = 0" (byte $12 bit 0; readme: used on every
+    undead foe, bosses too) and the PR's Coliseum copies of them (port.monster_copies)."""
+    import port
+    ids = {M.monster(e.id) for e in S.enemies(rom) if e.raw[18] & 1}
+    ids.discard(None)
+    ids |= {c for c, j in port.monster_copies().items() if j in ids}
+    return sorted(ids)
+
+
+BONUS_KEY ="MSG_BNW_ESPER_BONUS_{:02d}"  # the plugin returns these from MagicStoneData.GetMagicBonusMessageId
 
 
 def bonus_line(el, equip_text):
@@ -150,8 +185,16 @@ HARD_ITEMS = [
     ("Serial.FF6.Management.ParameterProvider", "RingsOfTheDeadId", "id", ("bit", 13, 7), ("bit", 13, 7)),
     ("Serial.FF6.Management.PassiveContentProvider", "ContentIdGaleHairpin", "id", ("bit", 10, 0), ("bit", 10, 0)),
     ("Serial.FF6.Management.PassiveContentProvider", "ContentIdAlarmPiercing", "id", ("bit", 10, 1), ("bit", 10, 1)),
-    ("Last.Battle.CalcExecuteCorrection", "PhysicalCorrectionAccessoryIds", "dict", ("bit", 9, 0), ("bit", 9, 0)),
-    ("Last.Battle.CalcExecuteCorrection", "MagicCorrectionAccessoryIds", "dict", ("bit", 9, 1), ("bit", 9, 1)),
+    # CalcExecuteCorrection.GetAccessoryPhysicalCorrectionValue(type): one list of accessories per
+    # type (its .cctor: 0 Offering [114] x0.5, 1 Genji Glove [112] x0.75 when dual wielding, 2 Atlas
+    # Armlet/Hero Ring [99, 104] x1.25, 3 Gauntlet [111] x2; only accessory slots count). BNW's items
+    # for each, accessories only: Offering = Daryl's Soul (the Kagenui weapons are the plugin's,
+    # ability 253), no Genji or Gauntlet accessory (dual wield and the grip are weapon properties)
+    ("Last.Battle.CalcExecuteCorrection", "PhysicalCorrectionAccessoryIds", "dict:0:armor", ("bit", 12, 0), ("bit", 12, 0)),
+    ("Last.Battle.CalcExecuteCorrection", "PhysicalCorrectionAccessoryIds", "dict:1:armor", ("bit", 12, 4), ("bit", 12, 4)),
+    ("Last.Battle.CalcExecuteCorrection", "PhysicalCorrectionAccessoryIds", "dict:2:armor", ("bit", 9, 0), ("bit", 9, 0)),
+    ("Last.Battle.CalcExecuteCorrection", "PhysicalCorrectionAccessoryIds", "dict:3:armor", ("bit", 12, 3), ("bit", 12, 3)),
+    ("Last.Battle.CalcExecuteCorrection", "MagicCorrectionAccessoryIds", "dict:0:armor", ("bit", 9, 1), ("bit", 9, 1)),
     # vanilla's list also has Ogre Nix (E: may break + MP crit); BNW's E is Aero
     ("Last.Battle.CalcExecuteCorrection", "UseMpCriticalWeaponIds", "array", ("special", 7, 14), ("special", 7)),
     ("Last.Battle.CalcExecuteCorrection", "NormalAttackHeal", "array", ("special", 12), ("special", 12)),
@@ -200,8 +243,16 @@ def hard_items(van, bnw):
     ve, be = _equipment(van), _equipment(bnw)
     lists = []
     for cls, member, kind, vrule, brule in HARD_ITEMS:
-        lists.append({"type": cls, "member": member, "kind": kind,
-                      "vanilla": _select(ve, vrule, content), "bnw": _select(be, brule, content)})
+        # "dict:<key>:armor": one key of a dictionary of lists, accessories (armor) only
+        kind, *opts = kind.split(":")
+        v, b = ve, be
+        if "armor" in opts:
+            v, b = [e for e in ve if e[1] == "armor"], [e for e in be if e[1] == "armor"]
+        entry = {"type": cls, "member": member, "kind": kind,
+                 "vanilla": _select(v, vrule, content), "bnw": _select(b, brule, content)}
+        if opts and opts[0].isdigit():
+            entry["key"] = int(opts[0])
+        lists.append(entry)
     passives = {k: _select(be, ("bit",) + bit, content) for k, bit in PASSIVE_BITS.items()}
     return lists, passives
 
@@ -293,4 +344,17 @@ def spirit_abilities(bnw):
             # procs): x1.5 from a two-handed grip, else x0.75
             "weapon_flag_abilities": ids(lambda d: d[7] & 0x08),
             "special_evade_abilities": special_evade,
+            # BNW's "respect row" (byte 7 bit 4, c2.asm C2/3392 GetRowFlag) on physical spells (byte 2 bit 0):
+            # its Blitz and Bushido halved from the back row like Fight (readme "Back Row Nerfs")
+            "respect_row_abilities": ids(lambda d: d[7] & 0x10 and d[2] & 0x01),
+            # Stamina as the only evasion (c0.asm StamPhase, from C2/22A8): an attack Stamina can block (byte 4
+            # bit 4), not "can't dodge" (bit 5), that is fractional (byte 4 bit 7) or MP damage (byte 3 bit 7), or
+            # North Cross's effect ($29): its Stamina roll replaces the hit's Evade / MBlock roll
+            "stamina_first_abilities": ids(lambda d: d[4] & 0x10 and not d[4] & 0x20
+                                           and ((d[3] | d[4]) & 0x80 or d[9] == 0x29)),
+            # fractional damage on a boss (c2.asm C2/50F4 Fractional, special effect $30): the fractional flag is
+            # dropped and the spell deals its normal damage from its power (BNW's spell power, by PR ability)
+            "boss_fractional": {str(a): rows[i][6] for i in range(len(rows)) if rows[i][9] == 0x30 and rows[i][4] & 0x80 and rows[i][6] > 0
+                                for a in ([M.spell(i)] + ([copies[M.spell(i)]] if M.spell(i) in copies else []))
+                                if M.spell(i) is not None},
             "special_multipliers": {str(k): v for k, v in sorted(port_specials.LAST.get("multipliers", {}).items())}}

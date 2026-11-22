@@ -1,3 +1,6 @@
+using System.Collections.Generic;
+using System.Linq;
+
 namespace BraveNewWorld.Rules
 {
     // BNW battle arithmetic the plugin applies, in the SNES's integer steps (offline-tested in
@@ -21,6 +24,18 @@ namespace BraveNewWorld.Rules
 
         // Shock's cost to its user: max HP / 8 (LSR x3).
         public static int ShockCost(int maxHp) => maxHp >> 3;
+
+        // A covering knight's Evade (c2.asm HalveEvasion) in 8 bits: vanilla's block value
+        // (C2/2861: Evade * 2 capped at 255, EOR #$FF, INC, 0 -> 255), then BNW's 255 - block,
+        // INC, LSR, LSR. Evade / 2 up to 127; 128 and above give 63.
+        public static int CoverEvade(int evade)
+        {
+            int a = evade <= 0 ? 0 : (evade >= 128 ? 255 : evade * 2);
+            int block = ((a ^ 0xFF) + 1) & 0xFF;
+            if (block == 0) block = 255;
+            int x = (((255 - block) & 0xFF) + 1) & 0xFF;
+            return x >> 2;
+        }
 
         // A sketched physical attack's "Vigor": the sketcher's Magic, doubled as the SNES stores
         // Vigor (c2.asm SketchMag: ASL in 8 bits, so Magic 128+ wraps), handed back undoubled.
@@ -57,6 +72,50 @@ namespace BraveNewWorld.Rules
                 bestHp = g.Hp;
             }
             return bestHp > 0 ? best : -1;
+        }
+
+        // BNW's "Elemental Share" (c2.asm C20BD3 + c0.asm EleModLoop): an attack with several
+        // elements counts points per element on the target, immune 0, resistant 1, normal 2, weak 4;
+        // no points = no damage, else points / 2 against the number of elements: equal = normal
+        // damage, more = double, fewer = half. Any absorbed element heals (checked first, as the
+        // game's own). Element types are the PR's ResistanceAttributeType: 0 normal, 1 weak, 2 half,
+        // 3 immune ("Invalid"), 4 absorb (401 / 402, double weak / half, count as weak / half).
+        public const int ElemNormal = 0, ElemWeak = 1, ElemHalf = 2, ElemNull = 3, ElemAbsorb = 4;
+
+        public static int ElementShare(IReadOnlyList<int> types)
+        {
+            if (types == null || types.Count == 0) return ElemNormal;
+            int points = 0;
+            foreach (var t in types)
+            {
+                if (t == ElemAbsorb) return ElemAbsorb;
+                points += t == ElemNull ? 0 : t == ElemHalf || t == 402 ? 1 : t == ElemWeak || t == 401 ? 4 : 2;
+            }
+            if (points == 0) return ElemNull;
+            int half = points >> 1, n = types.Count;
+            return half == n ? ElemNormal : half > n ? ElemWeak : ElemHalf;
+        }
+
+        // The target's element table as the game should read it for one multi-element attack, so its
+        // own rule (the strongest single response wins) gives BNW's share: every attack element normal
+        // but one carrying the outcome (an element already giving it, else the first). Null = leave the
+        // table as it is (an absorbed element, or a single-element attack: the game's rule is BNW's).
+        public static Dictionary<int, int> ElementView(IReadOnlyDictionary<int, int> table, IReadOnlyList<int> attack)
+        {
+            if (attack == null) return null;
+            var elems = attack.Where(a => a > 0).Distinct().ToList();
+            if (elems.Count < 2) return null;
+            var types = elems.Select(a => table != null && table.TryGetValue(a, out var t) ? t : ElemNormal).ToList();
+            int outcome = ElementShare(types);
+            if (outcome == ElemAbsorb) return null;
+            var view = table == null ? new Dictionary<int, int>() : table.ToDictionary(kv => kv.Key, kv => kv.Value);
+            foreach (var a in elems) view.Remove(a);
+            if (outcome != ElemNormal)
+            {
+                int at = types.IndexOf(outcome);
+                view[elems[at >= 0 ? at : 0]] = outcome;
+            }
+            return view;
         }
     }
 }

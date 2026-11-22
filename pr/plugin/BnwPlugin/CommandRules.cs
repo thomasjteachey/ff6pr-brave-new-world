@@ -36,6 +36,8 @@ namespace BraveNewWorld.PR
         static BnwData D => EsperHooks.D;
 
         const int Defend = 2, Row = 5, DanceCommand = 22, ScanAbility = 64;
+        internal const int NoiseBlasterItem = 30;   // PR item id (tools 30-37)
+        internal static int NoiseEvades;   // tests
         const int DanceStatus = 51;  // condition 51 (type 619), added by every dance (function 9)
         static readonly Dictionary<IntPtr, int> lastCommand = new Dictionary<IntPtr, int>();
         static readonly HashSet<IntPtr> freeTurn = new HashSet<IntPtr>();
@@ -54,11 +56,40 @@ namespace BraveNewWorld.PR
 
         // --- Steal --------------------------------------------------------------------------
 
+        // tests: force the next steals' outcome (null = roll)
+        internal static bool? ForceSteal;
+
         public static void Steal_Postfix(CalcControllerProvider __instance, ICalcResult __result)
+        {
+            try { StealRoll(__instance, __result); }
+            finally
+            {
+                // the outcome, for a Mug being worked out (EngineRules: BNW's Mug misses without a steal)
+                try
+                {
+                    if (__result != null && __instance?.target != null && Hooks.IsA<CalcControllerProvider>(__instance))
+                    {
+                        var res = __result.TryCast<CalcResult>();
+                        bool stolen = __result.GetHitType() == HitType.Hit && res != null && res.GetStealContentId() > 0;
+                        EngineRules.NoteSteal(__instance.target, stolen);
+                    }
+                }
+                catch (Exception e) { Hooks.WarnOnce("CommandRules.StealNote", e); }
+            }
+        }
+
+        static void StealRoll(CalcControllerProvider __instance, ICalcResult __result)
         {
             if (!Steal || __result == null || !Hooks.IsA<CalcControllerProvider>(__instance)) return;
             try
             {
+                if (ForceSteal is bool forced && __instance.userCharaData != null)
+                {
+                    var r = __result.TryCast<CalcResult>();
+                    __result.SetStatus(__result.GetValue(false), forced ? HitType.Hit : HitType.Non, __result.GetHitCount(), __result.GetConditions(), false);
+                    r?.SetStealContentId(forced ? 1 : 0);
+                    return;
+                }
                 if (__instance.userCharaData == null || __instance.attack == null) return;  // monsters steal gil as in vanilla
                 var monster = __instance.calcInfo?.targetMonster;
                 if (monster == null) return;
@@ -230,17 +261,21 @@ namespace BraveNewWorld.PR
             {
                 var c = BattleControllerManagement.Instance()?.GetCurrentProvider()?.TryCast<CalcControllerProvider>();
                 var ability = c?.ability;
+                // BNW's Noise Blaster (c2.asm Noiseblaster: "Stamina Evade" on its Muddle): a tool, so the
+                // act carries the item (PR item 30), not a listed ability
+                bool noise = c?.item?.Item?.Id == NoiseBlasterItem;
                 // only for the act being computed (the provider's own attacker and target)
-                if (ability == null || c.attack == null || c.target == null ||
+                if ((ability == null && !noise) || c.attack == null || c.target == null ||
                     c.attack.Pointer != attackerParameter.Pointer || c.target.Pointer != targetParameter.Pointer) return;
-                if (!D.SpiritEvadeAbilities.Contains(ability.Id)) return;
+                if (!noise && !D.SpiritEvadeAbilities.Contains(ability.Id)) return;
                 bool player = targetParameter.TryCast<PlayerCharacterParameter>() != null;
                 int stamina = player ? Math.Clamp(targetParameter.ConfirmedVitality(), 0, 255)
                     : BattleFormulas.MonsterStamina(targetParameter.ConfirmedMaxHp());
                 if (Rng.Next(128) > stamina) return;
                 __result = true;
-                int id = ability.Id;
-                Hooks.NoteOnce("spirit-evade", () => $"[commands] Spirit evaded a status (ability {id}, Stamina {stamina}: {stamina + 1}/128)");
+                if (noise) NoiseEvades++;
+                int id = noise ? -NoiseBlasterItem : ability.Id;
+                Hooks.NoteOnce(noise ? "spirit-evade-noise" : "spirit-evade", () => $"[commands] Spirit evaded a status ({(id < 0 ? "Noise Blaster" : $"ability {id}")}, Stamina {stamina}: {stamina + 1}/128)");
             }
             catch (Exception e) { Hooks.WarnOnce("CommandRules.SpiritEvade", e); }
         }

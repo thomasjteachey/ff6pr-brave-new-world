@@ -97,13 +97,31 @@ class Format(unittest.TestCase):
                         self.assertNotIn(",", v)
 
     def test_keys_point_at_files(self):
+        # each value names <path>.<any extension> (glob "<path>.*", case-insensitive here): every folder is listed
+        # once, its names cut at each dot, instead of one glob per value (thousands: 7.5 s for T-Edition)
+        listed = {}
+
+        def stems(folder):
+            if folder not in listed:
+                s = set()
+                try:
+                    for name in os.listdir(folder):
+                        n = name.lower()
+                        s.update(n[:i] for i in range(1, len(n)) if n[i] == ".")
+                except OSError:
+                    pass
+                listed[folder] = s
+            return listed[folder]
+
         for keyfile in glob.glob(os.path.join(MOD, "*", "keys", "*.json")):
             group_dir = os.path.dirname(os.path.dirname(keyfile))
             doc = json.load(open(keyfile, encoding="utf-8"))
             self.assertEqual(len(doc["keys"]), len(doc["values"]), keyfile)
             for v in doc["values"]:
-                with self.subTest(file=v):
-                    self.assertTrue(glob.glob(os.path.join(group_dir, *v.split("/")) + ".*"), f"missing {v}")
+                path = os.path.join(group_dir, *v.split("/"))
+                if os.path.basename(path).lower() not in stems(os.path.dirname(path)):
+                    with self.subTest(file=v):
+                        self.fail(f"missing {v}")
 
     def test_message_lines(self):
         vanilla = P.messages()
@@ -114,7 +132,10 @@ class Format(unittest.TestCase):
                     key, sep, value = line.partition("\t")
                     self.assertEqual(sep, "\t")
                     self.assertNotIn("\t", value)
-                    self.assertTrue(key in vanilla or key.startswith("MSG_BNW_"), f"key {key!r} not in the game's text")
+                    # a mod's own new keys: BNW's, the porter's new rows, T-Edition's (its new maps' titles, EX's abilities,
+                    # its plugin's rows: TED_)
+                    self.assertTrue(key in vanilla or key.startswith(("MSG_BNW_", "MSG_PORT_", "TEDMAP_", "TEDX_", "TED_")),
+                                    f"key {key!r} not in the game's text")
                     self.assertTrue(value.strip(), "empty text")
 
 
@@ -480,23 +501,98 @@ class MapFiles(unittest.TestCase):
         for path in glob.glob(os.path.join(MOD, "map_*", "Assets", "**", "*.json"), recursive=True):
             if os.path.basename(path).startswith("sc_"):
                 continue                     # scripts: a box's battle, a scripted chest's gift (below)
+            if os.path.basename(path).startswith("ev_bnw_"):
+                continue                     # an entity set the port added (port_boss_events: Kaiser), listed below
             rel = os.path.relpath(path, MOD)
+            if not os.path.exists(os.path.join(P.VANILLA, rel)):
+                # a map the port added (port_boss_events: Kaiser's room, snes_rooms.clone_map): in its package
+                sub = os.path.basename(os.path.dirname(path))
+                pkg = json.load(open(os.path.join(os.path.dirname(os.path.dirname(path)), "package.json"), encoding="utf-8"))
+                with self.subTest(file=rel):
+                    self.assertTrue(any(m["name"] == sub for m in pkg["map"]), "a new map's file outside its package")
+                continue
             van = json.load(open(os.path.join(P.VANILLA, rel), encoding="utf-8"))
             mod = json.load(open(path, encoding="utf-8"))
-            # NPCs the port added (port_merchants: script ids from 9901) aren't chest changes
+            # NPCs the port added (port_merchants: script ids from 9901) aren't chest changes; a vanilla
+            # NPC the port gave a script of its own (port_bnw_mechanics: Bob in the Dragon's Neck Cabin)
+            # is compared with vanilla's script id
+            vobjs = {o["id"]: o for lay in van.get("layers", []) for o in lay.get("objects") or []}
             for layer in mod.get("layers", []):
                 if layer.get("objects"):
-                    layer["objects"] = [o for o in layer["objects"]
-                                        if not any(p["name"] == "script_id" and p["value"] > 9900 for p in o.get("properties", []))]
+                    keep = []
+                    for o in layer["objects"]:
+                        sid = next((p for p in o.get("properties", []) if p["name"] == "script_id"), None)
+                        if sid is not None and sid["value"] > 9900:
+                            v = vobjs.get(o["id"])
+                            if v is None or v.get("name") != o.get("name"):
+                                continue
+                            sid["value"] = next(p["value"] for p in v["properties"] if p["name"] == "script_id")
+                            # ...and runs it (action 2) where vanilla only showed a message (bnw-scenes: Leo's grave)
+                            for p in o.get("properties", []):
+                                if p["name"] == "action_id":
+                                    p["value"] = next((q["value"] for q in v["properties"] if q["name"] == "action_id"), p["value"])
+                        keep.append(o)
+                    layer["objects"] = keep
+            # save points the port added (port_bnw_mechanics: BNW's new ones, a SavePoint + savepoint pair)
+            vids = {o["id"] for lay in van.get("layers", []) for o in lay.get("objects") or []}
+
+            def _strip_saves(ls):
+                for lay in ls:
+                    if lay.get("objects"):
+                        lay["objects"] = [o for o in lay["objects"] if not (o.get("name") in ("SavePoint", "savepoint") and o["id"] not in vids)]
+                    _strip_saves(lay.get("layers", []))
+            _strip_saves(mod.get("layers", []))
+            # doors the port leads into a map of its own (map ids past the game's 805: Kaiser's room, which
+            # BNW puts between two of Kefka's Tower's rooms): compared as vanilla's
+            vdoors = {o["id"]: o for lay in van.get("layers", []) for o in lay.get("objects") or [] if o.get("name") == "GotoMap"}
+            for layer in mod.get("layers", []):
+                for o in layer.get("objects") or []:
+                    props = {q["name"]: q for q in o.get("properties", [])}
+                    if o.get("name") == "GotoMap" and props.get("map_id", {}).get("value", 0) > 805 and o["id"] in vdoors:
+                        vp = {q["name"]: q["value"] for q in vdoors[o["id"]]["properties"]}
+                        props["map_id"]["value"], props["point_id"]["value"] = vp["map_id"], vp["point_id"]
+            # BNW's Jidoor has no door into the auction house (port_bnw_mechanics.close_auction): put it back
+            if MOD_NAME == "BraveNewWorld":
+                for vlay, mlay in zip(van.get("layers", []), mod.get("layers", [])):
+                    mids = {o["id"] for o in mlay.get("objects") or []}
+                    gone = [o for o in vlay.get("objects") or [] if o["id"] not in mids and o.get("name") == "GotoMap"
+                            and any(p["name"] == "map_id" and p["value"] in (111, 288) for p in o.get("properties", []))]
+                    for o in gone:   # back where vanilla has it
+                        mlay["objects"].insert(vlay["objects"].index(o), o)
+            # Cyan's dream as BNW's (port_bnw_dream): the Cyans it lays on the companions' spots (objects named
+            # "BNW ..."), and Stooge #3's boy at BNW's spot (ev_e_0898): compared as vanilla's
+            if MOD_NAME == "BraveNewWorld" and os.sep + "Map_30821_1" + os.sep in rel:
+                vpos = {o["id"]: (o["x"], o["y"]) for lay in van.get("layers", []) for o in lay.get("objects") or []}
+                for layer in mod.get("layers", []):
+                    if layer.get("objects"):
+                        layer["objects"] = [o for o in layer["objects"] if not o.get("name", "").startswith("BNW ")]
+                        if rel.endswith("ev_e_0898.json"):
+                            for o in layer["objects"]:
+                                if o.get("name") == "男の子" and o["id"] in vpos:
+                                    o["x"], o["y"] = vpos[o["id"]]
             # a map group's script lists: only the scripts the port added (a merchant's, a new
             # box's), each in the mod beside its map's entities
             if os.path.basename(path) == "package.json":
+                # maps the port added (Kaiser's room): their files beside the package
+                vnames = {m["name"] for m in van.get("map", [])}
+                for m in [m for m in mod.get("map", []) if m["name"] not in vnames]:
+                    for asset in [m["tilemap"], m["collision"], m["entity_default"]] + [x["asset"] for x in m["script"] + m.get("entity", [])]:
+                        with self.subTest(file=rel, asset=asset):
+                            self.assertTrue(os.path.exists(os.path.join(os.path.dirname(path), asset + ".json")))
+                mod["map"] = [m for m in mod.get("map", []) if m["name"] in vnames]
                 for m, vm in zip(mod.get("map", []), van.get("map", [])):
                     added = [x for x in m["script"] if x not in vm["script"]]
                     for x in added:
                         with self.subTest(file=rel, script=x["name"]):
                             self.assertTrue(os.path.exists(os.path.join(os.path.dirname(path), x["asset"] + ".json")))
                     m["script"] = [x for x in m["script"] if x not in added]
+                    # entity sets the port added (port_boss_events' Kaiser), each beside its map's files
+                    added = [x for x in m.get("entity", []) if x not in vm.get("entity", [])]
+                    for x in added:
+                        with self.subTest(file=rel, entity=x["name"]):
+                            self.assertTrue(os.path.exists(os.path.join(os.path.dirname(path), x["asset"] + ".json")))
+                    if "entity" in m:
+                        m["entity"] = [x for x in m["entity"] if x not in added]
             with self.subTest(file=rel):
                 self.assertEqual(diff_paths(van, mod), set(), "changed more than chest contents")
 
@@ -1041,6 +1137,29 @@ class Dialogue(unittest.TestCase):
         # Mog's fourth-wall joke in BNW, which Vanilla New World leaves out
         self.assertIn("get me earlier", " ".join(bnw.get("E0438_00_020_a_02", [])))
         self.assertIn("Don't scare me", " ".join(vnw.get("E0438_00_020_a_02", [])))
+
+    def test_obtained_names(self):
+        # "Obtained Gold Hairpin!" gives the armor BNW calls Goggles: the plugin puts in the game's own
+        # name for the key (keys only in the file, no text)
+        names = self.data.get("names", {})
+        self.assertEqual(names.get("E0439_00_020_a_03"), ["MSG_ARMOR_NAME_103"])
+        self.assertEqual(names.get("E0963_00_192_a_01"), ["MSG_MAGIC_NAME_70"])   # Quetzalli: BNW's Palidor
+        self.assertGreaterEqual(len(names.get("E0828_03_262_a_02", [])), 3)
+        for k, keys in names.items():
+            self.assertIn(k, self.pr, k)
+            self.assertEqual(len(keys), self.pr[k].count("Obtained "), k)
+
+    def test_rage_descriptions(self):
+        # BNW's Rage menu shows each rage's two attacks (ragedance_descriptions.asm): the rage
+        # abilities' content rows get a description key, BNW's own words for its 64 rages
+        mod = os.path.join(P.ROOT, "mods", "BraveNewWorld")
+        content = os.path.join(mod, "master", "Assets", "GameAssets", "Serial", "Data", "Master", "content.csv")
+        msgs = os.path.join(mod, "message", "Assets", "GameAssets", "Serial", "Data", "Message", "system_en.txt")
+        rows = {r["id"]: r for r in csv.DictReader(open(content, encoding="utf-8"))}
+        self.assertEqual(rows["969"]["mes_id_description"], "MSG_BNW_RAGE_INF_002")   # Soldier (ability 801)
+        text = dict(l.split("\t", 1) for l in open(msgs, encoding="utf-8").read().splitlines() if "\t" in l)
+        self.assertEqual(text["MSG_BNW_RAGE_INF_002"], "2/3: Cure 2; 1/3: Attack (2x dmg)")
+        self.assertEqual(sum(1 for k, v in text.items() if k.startswith("MSG_BNW_RAGE_INF_") and v.startswith("2/3: ")), 64)
 
 
 if __name__ == "__main__":

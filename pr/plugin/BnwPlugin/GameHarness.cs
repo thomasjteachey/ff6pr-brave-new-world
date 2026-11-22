@@ -34,10 +34,17 @@ namespace BraveNewWorld.PR
                 FormulaProbe.Quit("harness: quit");
                 return "quitting";
             }, "quit: end the probe run");
+            AiFights.Register();   // aikeep, ko, aistat, endfight: the monster-AI fights (tools/ai_fights.py)
+            DreamTest.Register();  // dreamparty, dreamstate: Cyan's dream (tools/port_bnw_dream.py)
+            SceneTests.Register(); // gil: BNW's added scenes (tools/port_bnw_added_scenes.py)
             Harness.Start(h);
         }
 
-        public static void Update() => Harness.Update();
+        public static void Update()
+        {
+            Harness.Update();
+            AiFights.Update();
+        }
 
         static string Party()
         {

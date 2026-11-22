@@ -16,7 +16,7 @@ namespace BraveNewWorld.PR
     public class Plugin : BasePlugin
     {
         public const string Guid = "ff6mod.bravenewworld";
-        public const string Version = "0.22.1";
+        public const string Version = "0.24.0";
         internal static ManualLogSource L;
 
         public override void Load()
@@ -44,7 +44,9 @@ namespace BraveNewWorld.PR
                 "and drop ones BNW removed.");
             var relicRules = Config.Bind("Battle", "RelicRules", true,
                 "BNW's numbers for relic effects: two-handed grip x1.5, Black Belt counter (Stamina+32)/129, Dragon Horn " +
-                "25% for one extra bounce, MP criticals cost Level/2, +25% magic relics don't stack, esper +25% boosts count.");
+                "25% for one extra bounce, MP criticals cost Level/2, +25% magic relics don't stack, esper +25% boosts count; " +
+                "True Knight cover as BNW has it (also a back-row ally, by Stamina), the covering knight's Evade halved and " +
+                "Interceptor never blocking a hit Shadow takes for someone else.");
             var waitTimes = Config.Bind("Battle", "WaitTimes", true,
                 "BNW's command wait times: Bushido, Tools, Blitz, Control, Slot, GP Rain x2, Summon x4, Morph waits, " +
                 "Jump/Pray/Shock halved, Steal, Mug, Runic, Leap, Mimic, Row, Defend, Possess, Magitek act at once.");
@@ -57,14 +59,16 @@ namespace BraveNewWorld.PR
             var damageRules = Config.Bind("Battle", "DamageRules", true,
                 "BNW's damage changes on top of the game's formulas: Fight formula, defensive variance by Vigor/Spirit, " +
                 "back row x0.75, Defend halves magic, BNW's monster special attack multipliers, Imp (equipment still counts, " +
-                "an imped attacker does half damage), Blind (a blinded attacker hits 50% of the time, even with can't-miss attacks).");
+                "an imped attacker does half damage), Blind (a blinded attacker hits 50% of the time, even with can't-miss attacks), " +
+                "hit rate x1.25 against Blind/Zombie/Muddle/Slow targets but not Rerise, and no harder to hit with Poison/Near Fatal/Seizure/Haste.");
             var statusTicks = Config.Bind("Battle", "StatusTicks", true,
                 "BNW's Regen/Poison/Sap: amounts from MaxHP and Stamina, Poison growing up to x16.5, ticks twice as often.");
             var stealRules = Config.Bind("Battle", "StealRules", true,
                 "BNW's Steal: success (Speed*2+112)/256, the rare item with chance Speed/256.");
             var turnRules = Config.Bind("Battle", "TurnRules", true,
                 "BNW's turns: half a turn after Defend or Row, a free turn after a successful Steal/Mug or a Scan; " +
-                "Morph has no gauge (always available, lasts until Revert or the battle's end); Umaro's attack odds.");
+                "Morph has no gauge (always available, lasts until Revert or the battle's end); Umaro's attack odds, and a thrown Mog " +
+                "always a critical hit.");
             var reflectRules = Config.Bind("Battle", "ReflectRules", true,
                 "BNW's Reflect: no timer, but 1 in 3 to break each time it reflects (not from equipment).");
             var commandLimits = Config.Bind("Battle", "CommandLimits", true,
@@ -75,12 +79,18 @@ namespace BraveNewWorld.PR
             var spiritEvade = Config.Bind("Battle", "SpiritEvasion", true,
                 "BNW's Spirit evasion: Spirit-evadable spells and monster specials miss a status with chance (Spirit+1)/128.");
             var atbFormula = Config.Bind("Battle", "AtbFormula", true,
-                "BNW's ATB speed: characters fill at 75*(Speed+51), monsters at 112.5*(Speed+20), vanilla 96*(Speed+20).");
+                "BNW's Speed Balance: ATB gauges fill at BNW's SNES rates, characters 75 x (Speed + 51) (Haste 90, Slow 60), " +
+                "monsters 112 x (Speed + 20) (Haste 135, Slow 90), with no battle-speed setting (vanilla: 96 x (Speed + 20)).");
+            var quickfill = Config.Bind("Battle", "Quickfill", true,
+                "BNW's Quickfill: battle time runs twice as fast while no party member's turn is up (ATB gauges, waits " +
+                "and status timers; time stands still anyway while an action plays).");
             var slotRules = Config.Bind("Battle", "SlotRules", true,
                 "Setzer's Slot as in BNW: BNW's reels (no Bahamut) and no rigging (reels stop where you stop them).");
-            var natb = Config.Bind("Battle", "nATB", false,
-                "Extra nATB stop (off: the Pixel Remaster already stops ATB, charging and status timers while an " +
-                "action is staged, BattleProgressATB.Update; this also stops them in the action's prepare/after phases).");
+            // a new key: the old "nATB" (default off, and it never stopped time) stays in players' config files as false
+            var natb = Config.Bind("Battle", "nATBOnly", true,
+                "BNW's nATB: time stops while an action plays out (ATB gauges, waits, status timers) and in the battle " +
+                "menus. As in BNW there is no Active/Wait or Battle Speed setting: those Config rows are hidden and battles " +
+                "run in Wait (your saved settings stay as they are for other games and mods; BNW's ATB fill ignores the battle speed, its waits are timed through it).");
             var encounterRates = Config.Bind("Field", "EncounterRates", true,
                 "Random battles come at BNW's SNES rates: its danger counter per map and world zone, at least ~10 steps " +
                 "between battles in most places, its party odds, the Mystery Egg halving them and Dirty Undies stopping them " +
@@ -106,6 +116,7 @@ namespace BraveNewWorld.PR
             try
             {
                 EsperHooks.D = BnwData.Load(dataPath);
+                BnwMonsterImages.Ensure(dataPath);   // BNW's monster images, made once from this game (the kit's PrKit/MonsterImages.cs)
             }
             catch (Exception e)
             {
@@ -127,7 +138,9 @@ namespace BraveNewWorld.PR
             WaitGauge.WaitTimes = waitTimes.Value;
             WaitGauge.Gauge = waitGauge.Value;
             BattleFormulas.Spirit = spiritAbilities.Value;
-            BattleFormulas.Atb = atbFormula.Value;
+            AtbRules.SpeedBalance = atbFormula.Value;
+            AtbRules.Quickfill = quickfill.Value;
+            AtbRules.Natb = natb.Value;
             BattleFormulas.Damage = damageRules.Value;
             StatusTicks.Enabled = statusTicks.Value;
             CommandRules.Steal = stealRules.Value;
@@ -154,6 +167,7 @@ namespace BraveNewWorld.PR
             ImpRules.Apply(harmony);
             BlindRules.Enabled = damageRules.Value;
             BlindRules.Apply(harmony);
+            HitRules.Enabled = damageRules.Value;
             MorphRules.Enabled = turnRules.Value;
             MorphRules.Apply(harmony);
             CommandWeapons.Enabled = hardItems.Value;
@@ -162,8 +176,21 @@ namespace BraveNewWorld.PR
             SlotRules.Apply(harmony);
             UmaroRules.Enabled = turnRules.Value;
             UmaroRules.Apply(harmony);
-            NatbRules.Enabled = natb.Value;
-            NatbRules.Apply(harmony);
+            Coliseum.Apply(harmony);   // BNW's Coliseum matches (the kit's SnesColiseum)
+            SuplexRules.Enabled = damageRules.Value;
+            SuplexRules.Apply(harmony);   // Suplex misses BNW's can't-be-suplexed monsters (the kit's SnesSuplex)
+            ReviveRules.Enabled = damageRules.Value;
+            ReviveRules.Apply(harmony);   // BNW's revive amounts: Phoenix Down 1 HP, Phoenix Tear 3/4, Life 250-500
+            ItemHealRules.Enabled = damageRules.Value;
+            ItemHealRules.Apply(harmony);   // BNW's fractional healing items: Tonic 1/2, Potion / X-Potion 3/4, Ethers 3/4 MP
+            ChakraGpRules.Enabled = damageRules.Value;
+            ChakraGpRules.Apply(harmony);   // Chakra restores (Stamina + Level)/2 MP; GP Rain costs Stamina x 10
+            WeaponEffects.Enabled = damageRules.Value;
+            WeaponEffects.Apply(harmony);   // Anti-Air x2/x3 on Fight; Zantetsuken/Ichimonji crit vs death-immune, Mug, Jump
+            FirstStrike.Enabled = turnRules.Value;
+            FirstStrike.Apply(harmony);   // BNW's starting ATB (Speed-weighted; back / preemptive / side cases)
+            AuditRules.Apply(harmony, damageRules.Value, turnRules.Value);   // audit batch B: Stamina evasion, fractional on bosses, Imp, counters on misses, back row, 0 MP
+            AtbRules.Apply(harmony);   // Speed Balance, Quickfill, nATB (the kit's SnesAtb, SnesQuickfill, SnesActionFreeze, BattleSettingsLock)
             CommandRules.Apply(harmony);
             SpecialCommands.Enabled = commandLimits.Value;
             SpecialCommands.Apply(harmony);
@@ -175,6 +202,17 @@ namespace BraveNewWorld.PR
             BnwEnemyAi.Apply(harmony, dataPath);   // no switch: the port gives these monsters only the plugin's shim
             if (encounterRates.Value) BnwEncounters.Apply(harmony, dataPath, randomEncounters);
             DialogText.Apply(harmony, Path.GetDirectoryName(dataPath), Config);   // BNW's script / Vanilla New World's on the story lines
+            BattleUi.Apply(harmony, Config);   // "Fail" / "Null" in place of Miss, Rage list tests; after CommandRules (its forced misses)
+            EngineRules.Apply(harmony, damageRules.Value, stealRules.Value, turnRules.Value);   // elemental share, Mug, Rage statuses + engine self-tests (after EsperHooks, CommandRules)
+            EsperResultRows.Apply(harmony);   // "<name> gained an EL" on the victory screen
+            HarnessItems.Register();   // harness: bnwgive <item> [n], exp
+            ExploderRule.Enabled = damageRules.Value;
+            ExploderRule.Apply(harmony);   // a party member's Exploder: 250% of the user's current HP
+            MindblowRule.Enabled = damageRules.Value;
+            MindblowRule.Apply(harmony);   // Bushido Mindblow: 500 MP (BNW's BlowFish effect on an MP hit)
+            Schematics.Enabled = hardItems.Value;
+            Schematics.Apply(harmony);   // Julian's Schematics in Figaro (World of Ruin): Auto Crossbow 225, never misses
+            JoinLevels.Apply(harmony);   // BNW's join levels: no averaging on rejoins, World of Ruin floors, first-join offsets
             FormulaProbe.Init(harmony);  // only when BepInEx/bnw_probe.request exists
             AddComponent<BnwRunner>();
             L.LogInfo($"Brave New World PR plugin loaded: {EsperHooks.D.Espers.Count} espers, " +
@@ -188,7 +226,7 @@ namespace BraveNewWorld.PR
     public class BnwRunner : MonoBehaviour
     {
         public BnwRunner(IntPtr ptr) : base(ptr) { }
-        bool verified, textVerified, slotChecked, runicChecked, sketchChecked, veldtChecked, gripChecked, limitsChecked, leapChecked, coverChecked;
+        bool verified, textVerified, slotChecked, runicChecked, sketchChecked, veldtChecked, gripChecked, limitsChecked, leapChecked, coverChecked, tossChecked, coliseumChecked;
         int tries, frame;
 
         // The Veldt's table as the game loaded it (null until the misc asset is in). The mod's
@@ -211,11 +249,16 @@ namespace BraveNewWorld.PR
         void Update()
         {
             if (++frame % 30 == 0) EsperStore.Invalidate();
+            if (frame % 120 == 0) EsperHooks.UnequipDisallowed();   // old saves: espers BNW forbids that character
+            if (frame % 60 == 30) Schematics.Sync();   // Figaro's World of Ruin soldier as Julian; Auto Crossbow's numbers
             if (frame % 10 == 0) { BattleRewards.Track(); WaitGauge.Track(); StatusTicks.Track(); }
+            if (frame % 10 == 5) BnwMonsterImages.Track();   // the final battle tower: a statue part that dies leaves the picture
             BattleFormulas.Track();  // Shock's cost to its user, after its hits
             if (verified && frame % 300 == 0) { HardItems.Fix(); RelicRules.SetConstants(); }
             TestKitHotkey.Update();
+            FormulaProbe.BattleChainDone = tossChecked;   // the chain below ends with toss; new checks: FormulaProbe.AddSelfTest
             BnwEnemyAi.Update();
+            RecoveryPoints.Update();   // BNW's full-recovery save points tinted (their heal is the port's trigger)
             DialogText.Update();
             FormulaProbe.Update();
             if (verified && !veldtChecked && frame % 60 == 0)
@@ -263,6 +306,15 @@ namespace BraveNewWorld.PR
                 }
                 catch (Exception e) { coverChecked = true; Plugin.L.LogWarning($"[cover] self-test: {e}"); }
             }
+            if (coverChecked && !tossChecked && frame % 60 == 0)
+            {
+                try
+                {
+                    var line = UmaroRules.TossSelfTest();   // probe battles only
+                    if (line != null) { tossChecked = true; Plugin.L.LogInfo(line); }
+                }
+                catch (Exception e) { tossChecked = true; Plugin.L.LogWarning($"[umaro] toss self-test: {e}"); }
+            }
             if (verified && !runicChecked && frame % 30 == 0)
             {
                 try
@@ -290,6 +342,12 @@ namespace BraveNewWorld.PR
                 }
                 catch (Exception e) { slotChecked = true; Plugin.L.LogWarning($"[slot] check: {e}"); }
             }
+            if (verified && !coliseumChecked && frame % 30 == 0)
+            {
+                coliseumChecked = true;
+                try { Plugin.L.LogInfo(Coliseum.Check()); }
+                catch (Exception e) { Plugin.L.LogWarning($"[coliseum] check: {e}"); }
+            }
             if (textVerified) return;
             if (verified)
             {
@@ -311,6 +369,12 @@ namespace BraveNewWorld.PR
                 if (guard == null || terra == null) { if (++tries % 300 == 0) Plugin.L.LogInfo("[verify] waiting for master data"); return; }
                 verified = true;
                 Plugin.L.LogInfo($"[verify] Guard HP={guard.Hp} | Terra Vigor={terra.Strength} Magic={terra.Magic}");
+                try
+                {
+                    var hit = HitRules.Fix();
+                    if (hit != null) Plugin.L.LogInfo(hit);
+                }
+                catch (Exception e) { Plugin.L.LogWarning($"[hit] {e}"); }
                 Plugin.L.LogInfo(EsperHooks.GuardSelfTest(mm));
             }
             catch (Exception e)

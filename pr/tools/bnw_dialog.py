@@ -130,6 +130,167 @@ def obtained(pr, caption):
     return [f"Obtained {m.group(1).strip()} magicite!"]
 
 
+# BNW's own lines the PR has no key for, in scenes the BNW port adds to the PR's map scripts (keys
+# BNW_<PR event>_<nn>; the plugin adds them to the game's text, with their speaker, in every language
+# and script choice: there's no PR text to fall back on). Key -> SNES dialogue (dialog_map numbering).
+ADDED_LINES = {
+    # the Sealed Gate (PR sc_e_0460_1, before its first battle; bnw-enemy-ai's script): Kefka followed you
+    **{f"BNW_E0460_{n + 1:02d}": 0xA60 + n for n in range(6)},
+    # Mog joining in the World of Ruin (PR sc_e_0778, BNW CC/396C): his tips on BNW's Dances
+    "BNW_E0778_01": 0x279, "BNW_E0778_02": 0x27B,
+}
+# speakers for added lines whose BNW text names none (the PR shows the name box from these)
+ADDED_SPEAKERS = {"BNW_E0778_01": "(MOG)", "BNW_E0778_02": "(MOG)"}
+
+
+def repurposed_dialogues():
+    """SNES dialogue numbers BNW took from a scene it removed and uses elsewhere (the auction's lines
+    are its Sealed Gate's, Bob's, the Esper World's...): the maps vanilla's field scripts show the
+    number in and BNW's don't meet (tools/snes_events.py on both ROMs; BNW's own event code in bank
+    ED included). A PR line placed on such a number would get unrelated text. Numbers vanilla uses that
+    BNW doesn't are left alone: mostly BNW code the decoder doesn't reach yet, not removed scenes."""
+    import event_diff
+    import snes_events as E
+    path = os.path.join(P.ROOT, "..", "build", "brave-new-world", "Brave New World 3.0 FRC.sfc")
+    if not os.path.exists(path):
+        return set()
+
+    def usage(rom):
+        p = E.Program(rom).walk_all()
+        u = collections.defaultdict(set)
+        for (off, md), ins in p.code.items():
+            if ins.cls == "dialog" and "dlg" in ins.args:
+                u[ins.args["dlg"] & 0x7FFF].update(p.maps_of[off])
+        return u
+    uv, ub = usage(E.load("us")), usage(event_diff.rom_for(path, [(0x230000, 0x260000)]))
+    return {d for d in uv if d in ub and not (uv[d] & ub[d])}   # the line map numbers dialogues as the event code does
+
+
+# choices the port gives more options than the PR's (port_bnw_scenes): the PR's option group -> the
+# option keys it adds after the PR's own, which take BNW's extra options' text
+EXTRA_OPTIONS = {
+    "E0873_00_010_c": ["BNW_E0873_00_010_c_03"],   # the Narshe blacksmith: Forge Apocalypse / Forge Illumina / Wait
+}
+
+
+# BNW-only dialogues by number, for scenes and NPCs the port adds where the PR has no event of its own
+# (bnw-enemy-ai's Bob, who sells the auction's espers): key BNW_D<number, 4 hex digits>, its options
+# BNW_D<number>_c_01.. (in order), its "Got the magicite [X]" as the PR's "Obtained X magicite!"
+ADDED_DIALOGUES = [
+    0xA56, 0xA57, 0xA58, 0xA59, 0xAC3, 0xAC4, 0xB19,   # Bob at Dragon's Neck Cabin (SNES map 186, CB/4F27)
+    0xA5A, 0xA55,                                       # Bob at the Coliseum (413, CB/4F85)
+    0x8C8, 0x8C9, 0x9E6,                                # the Cultists' Tower seller (362, CC/51FF)
+    0x675,                                              # Mikhail points Edgar to Julian (Figaro, SNES 58, CB/5201; DialogText)
+    0x16B, 0x16C, 0x16D,                                # the Returners' briefing's end (CB/034D; port_bnw_scenes)
+    # bnw-scenes (tools/port_bnw_added_scenes.py): BNW's added scenes, single-speaker dialogues
+    0x5FC, 0x69F, 0x6A2, 0xABF,                         # Kefka's Tower's barrier (the Falcon, SNES 17, EE/AF50)
+    0x0F5, 0xB60, 0x529,                                # Leo's Crest: South Figaro WoR (EE/B0B0), Leo's grave (EE/B0CD)
+    0x84D,                                              # Shadow hired with a full party (Kohlingen 191, ED/8DC6)
+    0x0FB,                                              # "Sealed by a mysterious force." (Kefka's Tower 331, CB/5252)
+    0x6A5,                                              # the Falcon's wheel: Lift off / Find Doom Gaze / Do nothing (CB/5238)
+]
+
+# bnw-scenes (tools/port_bnw_added_scenes.py): BNW-only dialogues whose speaker changes inside them get one key
+# per speaker turn (turns(): each page, split where a new "Name:" starts), BNW_D<number>_T<nn> from 01 in
+# BNW's order, each with its own speaker (a turn with none, "Got [X]", has no name box); the VNW script's
+# turns line up with BNW's for these. Single-speaker dialogues stay in ADDED_DIALOGUES.
+ADDED_TURN_DIALOGUES = [
+    0x5FD, 0xABD, 0x6A0, 0xABE, 0x6A1, 0x5FF, 0xAC0,   # Kefka's Tower's barrier (the Falcon, SNES 17, EE/AF50)
+    0x0F7,                                              # Leo's Spirits, South Figaro WoR (EE/B0C3)
+]
+
+
+def _turn_speaker(turn):
+    m = SPEAKER.match(turn)
+    if not m:
+        return ""
+    a = re.fullmatch(r"<A(\d+)>", m.group(1))
+    return (NAMES[int(a.group(1))] if int(a.group(1)) < len(NAMES) else "") if a else m.group(1).strip()
+
+
+def turn_lines(caps):
+    """{BNW_D<number>_T<nn>: [speaker, page]} for ADDED_TURN_DIALOGUES."""
+    out = {}
+    for d in ADDED_TURN_DIALOGUES:
+        for n, t in enumerate(turns(caps.get(d, "")), 1):
+            page = convert(t) or _got(t)
+            if page:
+                out[f"BNW_D{d:04X}_T{n:02d}"] = [_turn_speaker(t), page]
+    return out
+
+
+def turn_keys(d):
+    """The keys of one ADDED_TURN_DIALOGUES dialogue, in order (BNW's script), for the scripts that show it."""
+    return sorted(k for k in turn_lines(captions(os.path.join(SRC, SCRIPTS["bnw"])))
+                  if k.startswith(f"BNW_D{d:04X}_T"))
+
+
+def _got(turn):
+    """BNW's "Got the magicite [X]" / "Got [X]" in the PR's words, or None."""
+    m = re.search(r"Got the magicite \[([^\]]+)\]", turn)
+    if m:
+        return f"Obtained {m.group(1).strip()} magicite!"
+    m = re.search(r"Got \[([^\]]+)\]", turn)
+    return f"Obtained {m.group(1).strip()}!" if m else None
+
+
+def added_lines(caps):
+    """{key: [speaker, page, ...]} for ADDED_LINES and ADDED_DIALOGUES from a script's captions; speaker
+    "" = no name box."""
+    out = {}
+    lines = dict(ADDED_LINES)
+    lines.update({f"BNW_D{d:04X}": d for d in ADDED_DIALOGUES})
+    for d in ADDED_DIALOGUES:
+        for n, o in enumerate(choices(caps.get(d, "")) or [], 1):
+            out[f"BNW_D{d:04X}_c_{n:02d}"] = ["", o]
+    for key, d in lines.items():
+        bt = turns(caps.get(d, ""))
+        if not bt:
+            continue
+        m = SPEAKER.match(bt[0])
+        speaker = ""
+        if m:
+            name = m.group(1)
+            a = re.fullmatch(r"<A(\d+)>", name)
+            speaker = (NAMES[int(a.group(1))] if int(a.group(1)) < len(NAMES) else "") if a else name.strip()
+        pages = [p for p in (convert(x) or _got(x) for x in bt) if p]
+        if pages:
+            out[key] = [speaker or ADDED_SPEAKERS.get(key, "")] + pages
+    out.update(turn_lines(caps))   # bnw-scenes: per-speaker-turn keys (ADDED_TURN_DIALOGUES)
+    return out
+
+
+# "Obtained <name>!" / "Obtained <name> magicite!" in a PR story line (a page each); the plugin
+# (DialogText) uses the same pattern on the line it has
+OBTAINED = re.compile(r"Obtained (.+?)( magicite)?!")
+NAME_KEYS = re.compile(r"MSG_(ITEM|WEAPON|ARMOR|MAGIC)_NAME_\d+$")
+
+
+def obtained_names(pre):
+    """{PR line key: [name key per "Obtained X!" in it, "" where X isn't an item or esper]}: the
+    PR's lines name the item its script gives by the PR's name (the Gold Hairpin), which BNW renamed
+    (Goggles), so the plugin puts in the game's own current name for that key. Keys only: no text."""
+    names = collections.defaultdict(set)
+    for k, v in P.messages().items():
+        if NAME_KEYS.match(k):
+            names[re.sub(r"<[^>]*>", "", v).strip()].add(k)
+    out = {}
+    for k, v in pre.items():
+        if k.startswith("SPEAKER") or "Obtained" not in v:
+            continue
+        keys = []
+        for m in OBTAINED.finditer(v):
+            found = names.get(m.group(1).strip(), set())
+            if m.group(2):   # an esper: its magic name, not an item's
+                found = {x for x in found if x.startswith("MSG_MAGIC_NAME")}
+            else:
+                found = {x for x in found if not x.startswith("MSG_MAGIC_NAME")}
+            keys.append(next(iter(found)) if len(found) == 1 else "")
+        if any(keys):
+            out[k] = keys
+    return out
+
+
 def choices(caption):
     """BNW's choice options in order (converted), or None."""
     if "<C>" not in caption:
@@ -279,7 +440,9 @@ def _place(keys, jp_turns, bnw_turns):
     return out
 
 
-def build(rebuild_map=False):
+def build(rebuild_map=False, write=True):
+    """{"version": 1, "bnw": {...}, "vnw": {...}}, written to OUT (write=False: only returned; the
+    porter writes it with the mod's other files: profile_bnw.extra_data)."""
     path = os.path.join(M.OUT, "dialog_map.json")
     if rebuild_map or not os.path.exists(path):
         M.build(verbose=True)
@@ -310,7 +473,9 @@ def build(rebuild_map=False):
     for k, (d, a, b, score, how) in dmap.items():
         if k in pre and mode.get(k) and k not in option:
             by_dlg[d].append((a, b, k))
-    result, stats = {}, {}
+    result, stats, added = {}, {}, {}
+    reused = repurposed_dialogues()
+    import dialog_align as DA
     for name, rel in SCRIPTS.items():
         caps = captions(os.path.join(SRC, rel))
         caps.update(captions(os.path.join(SRC, os.path.dirname(rel), "btlBigCaption_script.txt"), M.BATTLE))
@@ -348,6 +513,11 @@ def build(rebuild_map=False):
                         rows = [r for p in pages for r in p.split("\n")]
                         pages = ["\n".join(rows[i:i + 2]) for i in range(0, len(rows), 2)]
                         pages = [re.sub(r"^(\(FULL_SPACE\))+", "", p) for p in pages]
+                    if pages and d in reused:
+                        a, b = set(DA.toks(pre[k])), set(DA.toks(" ".join(pages)))
+                        if 2 * len(a & b) / max(1, len(a) + len(b)) < 0.3:
+                            st["repurposed: PR's kept"] += 1
+                            continue
                     if pages:
                         lines[k] = pages
                         if m != "plain":
@@ -361,27 +531,36 @@ def build(rebuild_map=False):
             if k in pre and k not in option:
                 stem_dlg["_".join(k.split("_")[:3])].add(d)
         groups = collections.defaultdict(list)
-        for k in option:
+        for k in sorted(option):   # sorted: a set's order follows each process's string hashes (identical ports, same bytes)
             groups[k.rsplit("_", 1)[0]].append(k)
+        extra = {}
         for g, ks in groups.items():
             ks.sort()
-            if any(mode.get(k) is None for k in ks):
+            ks = ks + EXTRA_OPTIONS.get(g, [])
+            if any(mode.get(k) is None for k in ks if k in mode):
                 continue   # an option that quotes the opera's lyrics: the PR's choice stays
             for d in sorted(stem_dlg.get("_".join(ks[0].split("_")[:3]), ())):
                 opts = choices(caps.get(d, ""))
                 if opts and len(opts) == len(ks):
                     for k, o in zip(ks, opts):
-                        lines[k] = [o]
+                        if k.startswith("BNW_"):
+                            extra[k] = ["", o]       # an option the port adds: DialogText's added lines
+                        else:
+                            lines[k] = [o]
                     st["choice options"] += len(ks)
                     break
         result[name] = lines
+        added[name] = {**added_lines(caps), **extra}
         st["lines"] = len(lines)
         stats[name] = dict(st)
     changed = sum(1 for k in result["vnw"] if result["vnw"][k] != result["bnw"].get(k))
-    os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    json.dump({"version": 1, **result}, open(OUT, "w", encoding="utf-8"), ensure_ascii=False, indent=0)
-    print(f"{OUT}: " + "; ".join(f"{n} {s}" for n, s in stats.items()) + f"; Vanilla New World differs on {changed} lines")
-    return result
+    payload = {"version": 1, **result, "names": obtained_names(pre), "added": added}
+    if write:
+        os.makedirs(os.path.dirname(OUT), exist_ok=True)
+        json.dump(payload, open(OUT, "w", encoding="utf-8"), ensure_ascii=False, indent=0)
+    print(f"{OUT if write else 'bnw_dialog.json'}: " + "; ".join(f"{n} {s}" for n, s in stats.items()) +
+          f"; Vanilla New World differs on {changed} lines")
+    return payload
 
 
 if __name__ == "__main__":

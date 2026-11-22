@@ -3,8 +3,8 @@
 Brave New World 3.0, the FF6 rebalance and
 redesign by Synchysi and its contributors, ported to the Steam Pixel Remaster. **In development:
 preview builds are on the [Releases](https://github.com/thomasjteachey/ff6pr-brave-new-world/releases)
-page** (about 87% done: data, espers, the battle engine, BNW's enemy AI and its dialogue are in;
-BNW's monster art is not, and it hasn't had a full playthrough yet).
+page** (about 96% done: data, espers, the battle engine and timing, BNW's enemy AI, monster art,
+scenes, Coliseum and dialogue are in; it hasn't had a full playthrough yet).
 
 ## Playing it
 

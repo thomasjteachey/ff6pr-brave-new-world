@@ -15,7 +15,8 @@ namespace BraveNewWorld.PR
     //    action, per ability. BNW changed SNES's per-command waits (c2.asm CommandWaitTimes):
     //    Bushido/Tools/Blitz/Control/Slot/GP Rain x2, Summon x4, Morph from none to Magic's
     //    double, Jump/Health/Shock halved, Steal/Mug/Runic/Leap/Mimic/Row/Defend/Possess/
-    //    Magitek none. Each chant time is scaled by BNW / vanilla for its command;
+    //    Magitek none. With Speed Balance on (AtbFormula), each wait is BNW's in SNES seconds (AbsoluteWait,
+    //    Rules/BnwAtb.cs); off, each chant time is scaled by BNW / vanilla for its command;
     //  * while a character waits, their ATB bar shows the wait left, draining (the cast bar);
     //  * the bar is red under Stop, yellow under Slow, green under Haste.
     static class WaitGauge
@@ -46,7 +47,9 @@ namespace BraveNewWorld.PR
             if (D == null || battleActData == null || !Hooks.IsA<BattleProgressATBFF6>(__instance)) return;
             try
             {
-                if (WaitTimes && battleActData.AttackUnitData?.TryCast<BattlePlayerData>() != null)
+                if (WaitTimes && AtbRules.SpeedBalance && battleActData.AttackUnitData?.TryCast<BattlePlayerData>() != null)
+                    AbsoluteWait(battleActData, ref __result);
+                else if (WaitTimes && battleActData.AttackUnitData?.TryCast<BattlePlayerData>() != null)
                 {
                     var (vanilla, bnw, what) = WaitsFor(battleActData);
                     float before = __result;
@@ -60,6 +63,60 @@ namespace BraveNewWorld.PR
                 totals[battleActData.Pointer] = __result;
             }
             catch (Exception e) { Hooks.WarnOnce("WaitGauge.Chant", e); }
+        }
+
+        // With Speed Balance on (AtbRules): the wait as BNW's SNES times it, in seconds of battle clock (Rules/BnwAtb.cs:
+        // BNW's table on BNW's ATB rate; Fight at Speed 33 0.70 s where the PR's own chant is 1.64 s), not a ratio
+        // on the PR's chant, whose shape (20 x ability_wait / (Agility / 2 + 20)) isn't the SNES's. The chant counts
+        // down at the frame's time x the battle speed (UpdateChantTime), so the seconds are x that speed (x1 under
+        // nATB's lock), as the kit's SnesAtb does for vanilla.
+        internal static readonly Dictionary<IntPtr, (int Command, int Wait, float Seconds)> Timed = new Dictionary<IntPtr, (int, int, float)>();   // test: act -> BNW's wait
+        static int timedLogged;
+        static readonly HashSet<int> unknownCommands = new HashSet<int>();
+
+        static void AbsoluteWait(BattleActData act, ref float chant)
+        {
+            var abilities = act.abilityList;
+            var ab = abilities != null && abilities.Count > 0 ? abilities[0] : null;
+            var u = act.AttackUnitData;
+            var p = u?.BattleUnitDataInfo?.Parameter;
+            if (ab == null || p == null) return;
+            bool haste = false, slow = false, wild = false, dancing = false;
+            var list = p.CurrentConditionList;
+            if (list != null)
+                foreach (var c in list)
+                {
+                    if (c == null) continue;
+                    int t = c.ConditionType;
+                    if (t == PrKit.Ff6.SnesAtbRules.HasteType) haste = true;
+                    else if (t == PrKit.Ff6.SnesAtbRules.SlowType) slow = true;
+                    else if (t == PrKit.Ff6.SnesAtbRules.BerserkType || t == PrKit.Ff6.SnesAtbRules.ConfusionType) wild = true;
+                    else if (t == PrKit.Ff6.SnesAtbRules.DanceType) dancing = true;
+                }
+            int cmd = act.Command?.Id ?? 0;
+            // BNW's Dance (CommandRules.Dance): the dancer stays under control, so no Dance act is an automatic one
+            bool autoDance = dancing && cmd == PrKit.Ff6.SnesAtbRules.DanceCommand && !CommandRules.Dance;
+            float was = chant;
+            var kind = BnwAtb.WaitFor(D.Waits, ab.TypeId, cmd, false, act.isManipulateAttack, wild, act.isRampageAct, autoDance,
+                                      act.isCopiedAct, out int wait);
+            if (kind == BnwAtb.Wait.Game) return;
+            if (kind == BnwAtb.Wait.Unknown)
+            {
+                if (unknownCommands.Add(cmd))
+                    Plugin.L.LogInfo($"[wait] no BNW wait for command {cmd} (ability {ab.Id}, type {ab.TypeId}): the game's chant {was:0.00} stays");
+                return;
+            }
+            double secs = kind == BnwAtb.Wait.Now ? 0 : BnwAtb.Seconds(wait, p.ConfirmedAgility(), haste, slow);
+            int cfg = Last.Management.UserDataManager.Instance()?.Config?.BattleSpeed ?? 2;
+            chant = (float)(secs * BattleUtility.GetBattleSpeedByConfigValue(cfg));
+            if (Timed.Count > 500) Timed.Clear();
+            Timed[act.Pointer] = (cmd, wait, (float)secs);
+            if (timedLogged < 6)
+            {
+                timedLogged++;
+                Plugin.L.LogInfo($"[wait] command {cmd} (ability {ab.Id}, type {ab.TypeId}): BNW's wait {wait:X2} = {secs:0.00} s at Speed " +
+                                 $"{p.ConfirmedAgility()}{(haste ? " Haste" : "")}{(slow ? " Slow" : "")} (the game's chant {was:0.00})");
+            }
         }
 
         static (int Vanilla, int Bnw, string What) WaitsFor(BattleActData act)
@@ -147,14 +204,52 @@ namespace BraveNewWorld.PR
             return null;
         }
 
+        // The tint goes on the image's CanvasRenderer colour (multiplied with Graphic.color) when the
+        // gauge's own colour is white, so image.color stays the game's: the separate Battle Options
+        // mod copies the first character gauge's image.color once for its enemy bars (EnemyAtb
+        // TakeArt), which a status tint there would have turned red/yellow/green for the session.
+        // A gauge with a coloured image.color is tinted by replacing it, as before.
         static void Tint(UnityEngine.UI.Image image, Color? color)
         {
             if (image == null) return;
             var key = image.Pointer;
             if (!baseColors.TryGetValue(key, out var original))
+            {
                 baseColors[key] = original = image.color;
-            var want = color ?? original;
-            if (image.color != want) image.color = want;
+                var o = original;
+                Hooks.NoteOnce("atb-tint", () => $"[wait] ATB gauge colour {o}: tinted through its {(White(o) ? "CanvasRenderer" : "image colour")}");
+            }
+            if (White(original))
+            {
+                var cr = image.canvasRenderer;
+                if (cr == null) return;
+                var want = color ?? Color.white;
+                want.a = cr.GetAlpha();   // the game's own fades stay
+                if (cr.GetColor() != want) cr.SetColor(want);
+                return;
+            }
+            var replace = color ?? original;
+            if (image.color != replace) image.color = replace;
+        }
+
+        static bool White(Color c) => c.r >= 0.99f && c.g >= 0.99f && c.b >= 0.99f;
+
+        // harness (bnwui bars): each party member's bar as drawn now: the wait left (a cast bar) or the gauge
+        internal static string Bars()
+        {
+            var battle = BattlePlugManager.Instance();
+            if (battle == null || !battle.IsBattle()) return "error: not in a battle";
+            var parts = new List<string>();
+            foreach (var u in battle.GetPlayerUnits())
+            {
+                var p = u.TryCast<BattlePlayerData>();
+                if (p == null) continue;
+                float left = WaitLeft(p);
+                var c = StatusColor(p);
+                parts.Add($"{p.ownedCharacterData?.Name}: {(left >= 0 ? $"waiting, {left:P0} left (cast bar)" : "no wait")}" +
+                          (c != null ? $", tint {(c == Stop ? "Stop" : c == Slow ? "Slow" : "Haste")}" : ""));
+            }
+            return string.Join(" | ", parts);
         }
 
         // A new battle: forget the last one's actions.

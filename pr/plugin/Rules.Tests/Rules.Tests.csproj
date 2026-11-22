@@ -9,7 +9,15 @@
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>
+  <!-- the kit's game-free monster image builder (BNW's images are tested here); the kit beside this
+       project, else the kit/ submodule (ff6pr-brave-new-world) -->
+  <PropertyGroup>
+    <KitDir>$(MSBuildThisFileDirectory)..\PrKit\</KitDir>
+    <KitDir Condition="!Exists('$(KitDir)')">$(MSBuildThisFileDirectory)..\..\..\kit\pr\plugin\PrKit\</KitDir>
+  </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\Rules\*.cs" />
+    <Compile Include="$(KitDir)MonsterImages.cs" />
+    <Compile Include="$(KitDir)Ff6\SnesAtbRules.cs" />   <!-- the SNES ATB math BnwAtb runs on (game-free) -->
   </ItemGroup>
 </Project>

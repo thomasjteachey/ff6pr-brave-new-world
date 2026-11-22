@@ -56,7 +56,11 @@ namespace BraveNewWorld.PR
         {
             var d = EsperHooks.D;
             if (!Enabled || d.SketchCommandId == 0) return "[sketch] check: off";
-            var owned = Last.Management.UserDataManager.Instance()?.GetOwnedCharactersClone(false);
+            // a log-only check polled from BnwRunner: while a save loads the game rebuilds the roster, and
+            // cloning it then throws ("Collection was modified"): try again on the next poll
+            Il2CppSystem.Collections.Generic.List<Last.Data.User.OwnedCharacterData> owned;
+            try { owned = Last.Management.UserDataManager.Instance()?.GetOwnedCharactersClone(false); }
+            catch (Exception) { return null; }
             if (owned == null || owned.Count == 0) return null;
             var data = Serial.ProviderManager.Instance?.CommandAvailableProvider?.serialData
                 ?.TryCast<Serial.FF6.Management.CommandAvailableData>();

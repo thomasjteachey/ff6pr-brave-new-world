@@ -28,24 +28,160 @@ namespace BraveNewWorld.PR
     //  * a knight can't cover while dead, petrified, invisible, a zombie, in Magitek armor,
     //    blinded, asleep, confused, berserk, with Image, dancing, stopped, frozen or hidden.
     // BNW also drops the knight's Defend when it covers (done here); its Love Token relic has no
-    // PR counterpart. Config: [Battle] RelicRules.
+    // PR counterpart.
+    // The covered hit itself (c2.asm HalveEvasion, SkipDogBlock: "is target a bodyguard"): the
+    // guard's Evade counts half (floor), and Shadow's Interceptor never blocks a hit he takes for
+    // someone else. The PR applies cover in BattleFunction2.FixedTarget (the only caller of
+    // ProtectExtractTarget) and computes that act's hits in BattleFunction2.HitCalc, one call for
+    // all targets (decompiled tools/decomp/cover_hit): CalcControllerProvider.GetFightStatus rolls
+    // Interceptor there (WildFangConditionFunction.CheckDefendInvoke, 50% vs physical attacks) and
+    // PhysicalExecution reads the target's ConfirmedEvasionRate (Block = (128 - Evade) * 2). So
+    // while a covered act's HitCalc runs, the guard's evasion reads halved and the roll says no.
+    // Config: [Battle] RelicRules.
     static class CoverRules
     {
         internal static bool Enabled = true;
         static readonly Random Rng = new Random();
+        // during a covered act's BattleFunction2.HitCalc: the guard (its unit and its parameters:
+        // the battle unit's and its OwnedCharacterData's, either of which the calc may read)
+        [ThreadStatic] static IntPtr hitGuard, hitGuardParam, hitGuardParam2;
 
         public static void Apply(Harmony h)
         {
             if (!Enabled) return;
             Hooks.Patch(h, typeof(TargetFunction), "ProtectExtractTarget", typeof(CoverRules), postfix: nameof(Extract_Postfix));
+            Hooks.Patch(h, typeof(BattleFunction2), "HitCalc", typeof(CoverRules), prefix: nameof(HitCalc_Prefix), postfix: nameof(HitCalc_Postfix));
+            Hooks.Patch(h, typeof(Last.Data.PlayerCharacterParameter), "ConfirmedEvasionRate", typeof(CoverRules), postfix: nameof(Evasion_Postfix));
+            Hooks.Patch(h, typeof(WildFangConditionFunction), "CheckDefendInvoke", typeof(CoverRules), prefix: nameof(DefendInvoke_Prefix));
         }
+
+        // --- the covered hit ------------------------------------------------------------------
+
+        public static void HitCalc_Prefix(BattleFunction2 __instance)
+        {
+            hitGuard = hitGuardParam = hitGuardParam2 = IntPtr.Zero;
+            if (!Enabled || __instance == null) return;
+            try
+            {
+                var act = __instance.battleActData;
+                var covered = act?.ProtectedTarget;
+                var targets = act?.TargetUnitDatas;
+                if (covered == null || targets == null || targets.Length != 1) return;
+                var guard = targets[0];
+                if (guard == null || guard.Pointer == covered.Pointer) return;
+                hitGuard = guard.Pointer;
+                hitGuardParam = guard.BattleUnitDataInfo?.Parameter?.Pointer ?? IntPtr.Zero;
+                hitGuardParam2 = guard.TryCast<BattlePlayerData>()?.ownedCharacterData?.Parameter?.Pointer ?? IntPtr.Zero;
+                Hooks.NoteOnce("cover-hit", () => $"[cover] a covered hit: {guard.TryCast<BattlePlayerData>()?.ownedCharacterData?.Name} " +
+                                                  $"takes it for {covered.TryCast<BattlePlayerData>()?.ownedCharacterData?.Name} (Evade halved, no Interceptor)");
+            }
+            catch (Exception e) { Hooks.WarnOnce("CoverRules.HitCalc", e); }
+        }
+
+        public static void HitCalc_Postfix() => hitGuard = hitGuardParam = hitGuardParam2 = IntPtr.Zero;
+
+        // BNW: Evade / 2 for the guard (255 - Block = Evade * 2 - 1, INC, LSR, LSR)
+        public static void Evasion_Postfix(Last.Data.PlayerCharacterParameter __instance, ref int __result)
+        {
+            if (hitGuard == IntPtr.Zero || __instance == null) return;
+            var p = __instance.Pointer;
+            if (p == IntPtr.Zero || (p != hitGuardParam && p != hitGuardParam2)) return;
+            int was = __result;
+            __result = HalvedEvade(was);
+            EvadeReads++;
+            LastEvade = (was, __result);
+            Hooks.NoteOnce("cover-evade", () => $"[cover] the covering knight's Evade {was} -> {HalvedEvade(was)} (BNW halves it)");
+        }
+
+        // for the self-test: how often each hook acted, the last Evade it changed
+        internal static int EvadeReads, InterceptorSkips;
+        internal static (int Was, int Now) LastEvade;
+
+        internal static int HalvedEvade(int evade) => BattleMath.CoverEvade(evade);
+
+        // BNW's SkipDogBlock: no Interceptor block on a hit the guard takes for someone else (the
+        // act has the one target, the guard, so any roll here is the guard's)
+        public static bool DefendInvoke_Prefix(WildFangConditionFunction __instance, ref bool __result)
+        {
+            if (hitGuard == IntPtr.Zero || __instance == null) return true;
+            try { __instance.isDefendInvoke = false; }
+            catch (Exception e) { Hooks.WarnOnce("CoverRules.DefendInvoke", e); }
+            __result = false;
+            InterceptorSkips++;
+            Hooks.NoteOnce("cover-interceptor", () => "[cover] Interceptor doesn't block a covered hit (BNW)");
+            return false;
+        }
+
+        // an attack run the way the game runs an act's functions (the kit's SnesUmaro.RunAct)
+        internal static (BattleUnitData Took, Last.Systems.HitType Hit, string Error) RunAttack(
+            BattleUnitData attacker, BattleUnitData target, Last.Data.Master.Command command, Last.Data.Master.Ability ability) =>
+            PrKit.Ff6.SnesUmaro.RunAct(attacker, target, command, ability);
+
+        // Probe battles: the covered hit through the game's own act flow. The guard is a knight and
+        // has Interceptor (WildFang) on; the target is Near Fatal, so BNW's rules cover it. Each act
+        // must land on the guard with its Evade read halved and Interceptor never rolling; the same
+        // attack on the guard directly (no cover) must leave both alone (Interceptor blocks ~half).
+        static string CoveredHitTest(BattleUnitData guard, BattleUnitData target, BattleUnitData enemy,
+            BattleConditionController cc, Last.Data.Master.Command fight, Last.Data.Master.Ability attack)
+        {
+            const int N = 40;
+            var tp = target.BattleUnitDataInfo.Parameter;
+            int hpWas = tp.CurrentHP;
+            bool dogWas = Has(Conditions(guard), ConditionType.WildFang);
+            int onGuard = 0, misses = 0, errors = 0, evade0 = EvadeReads, skip0 = InterceptorSkips;
+            string firstError = null;
+            int dMisses = 0, dErrors = 0, dEvade, dSkip;
+            try
+            {
+                if (!dogWas) cc.InterruptAddCondition(guard, ConditionType.WildFang);
+                bool dog = Has(Conditions(guard), ConditionType.WildFang);
+                tp.CurrentHP = Math.Max(1, tp.ConfirmedMaxHp() / 16);
+                cc.InterruptAddCondition(target, ConditionType.Dying);
+                for (int i = 0; i < N; i++)
+                {
+                    tp.CurrentHP = Math.Max(1, tp.ConfirmedMaxHp() / 16);
+                    var r = RunAttack(enemy, target, fight, attack);
+                    if (r.Error != null) { errors++; firstError ??= r.Error; continue; }
+                    if (r.Took != null && r.Took.Pointer == guard.Pointer) onGuard++;
+                    if (r.Hit == Last.Systems.HitType.Miss) misses++;
+                }
+                int evadeReads = EvadeReads - evade0, skips = InterceptorSkips - skip0;
+                var lastEvade = LastEvade;
+                cc.InterruptRemoveCondition(target, ConditionType.Dying);
+                tp.CurrentHP = hpWas;
+                // the control: the guard attacked directly, nobody covering
+                int e1 = EvadeReads, s1 = InterceptorSkips;
+                for (int i = 0; i < N; i++)
+                {
+                    var r = RunAttack(enemy, guard, fight, attack);
+                    if (r.Error != null) { dErrors++; firstError ??= r.Error; continue; }
+                    if (r.Hit == Last.Systems.HitType.Miss) dMisses++;
+                }
+                dEvade = EvadeReads - e1;
+                dSkip = InterceptorSkips - s1;
+                bool ok = errors == 0 && onGuard == N && evadeReads >= N && skips == (dog ? N : 0) && dEvade == 0 && dSkip == 0;
+                return $"[cover] covered-hit self-test {(ok ? "ok" : "FAILED")}: {N} monster Attacks on the Near Fatal ally (knight " +
+                       $"{(dog ? "with" : "WITHOUT")} Interceptor): {onGuard} landed on the knight, {misses} missed, Evade read halved " +
+                       $"{evadeReads} times (last {lastEvade.Was} -> {lastEvade.Now}), Interceptor rolls skipped {skips}, errors {errors}; " +
+                       $"{N} on the knight directly: {dMisses} missed (Interceptor rolls as usual), Evade halved {dEvade}, skipped {dSkip}, " +
+                       $"errors {dErrors}{(firstError != null ? $" (first: {firstError})" : "")}";
+            }
+            finally
+            {
+                tp.CurrentHP = hpWas;
+                cc.InterruptRemoveCondition(target, ConditionType.Dying);
+                if (!dogWas) cc.InterruptRemoveCondition(guard, ConditionType.WildFang);
+            }
+        }
+
+        // --- the guard ------------------------------------------------------------------------
 
         static readonly ConditionType[] TargetBlocked =
         {
             ConditionType.UnableFight, ConditionType.Mineralization, ConditionType.Transparent, ConditionType.Zombie,
             ConditionType.Madou, ConditionType.Blink,
         };
-        static readonly ConditionType[] GuardBlocked =
+        internal static readonly ConditionType[] GuardBlocked =
         {
             ConditionType.UnableFight, ConditionType.Mineralization, ConditionType.Transparent, ConditionType.Zombie,
             ConditionType.Madou, ConditionType.Blind, ConditionType.Sleep, ConditionType.Confusion, ConditionType.Bersak,
@@ -227,7 +363,9 @@ namespace BraveNewWorld.PR
                 string gameHealthy = Run(false), bnwHealthy = Run(true);
                 bool ok = bnwDying.StartsWith(expected ? "covered" : "not covered")
                           && (targetBack || bnwHealthy.StartsWith("not covered"));
-                return $"[cover] self-test {(ok ? "ok" : "FAILED")}: knight set {knight}, Near Fatal set {dyingSet}, knight " +
+                string hit = expected ? CoveredHitTest(guard, target, enemy, cc, fight, attack)
+                                      : "[cover] covered-hit self-test skipped: BNW wouldn't cover here";
+                return hit + System.Environment.NewLine + $"[cover] self-test {(ok ? "ok" : "FAILED")}: knight set {knight}, Near Fatal set {dyingSet}, knight " +
                        $"{(guardBack ? "back" : "front")} row{(blocked ? ", blocked" : "")}, target {(targetBack ? "back" : "front")} row; " +
                        $"Near Fatal target: the game's rules {gameDying}, BNW's {bnwDying} (BNW: {(expected ? "covered" : "not covered")}); " +
                        $"healthy target: the game's {gameHealthy}, BNW's {bnwHealthy}";

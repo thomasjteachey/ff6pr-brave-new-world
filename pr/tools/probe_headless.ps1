@@ -20,13 +20,15 @@
 #  Brave New World and Worlds Collide are separate mods, one installed at a time
 #  (tools/deploy.sh --bnw / --wc): the probe and the harness need BNW installed, -WcTest and
 #  -Live need Worlds Collide (the run says so and stops otherwise).
+#  -Graphics: keep the graphics device (still -batchmode, no window): the harness's "shot <png>"
+#     renders the game's picture
 #  -Minutes N: stop the run (its own game) after N minutes; default 15
 #  -Until "<regex>": stop as soon as the log has a line matching it (with the probe: a startup
 #     check, without waiting for the whole probe); prints the matching lines
 #  -Extra "key=value;key=value": more lines for the probe's request, e.g.
 #     "shopcheck=298:1:sc_npc_20451_2_bnw_shop" (warp, run a merchant's script, see the shop open)
 param([int]$Party = 7, [int]$Weapon = 9, [int]$Samples = 8, [string]$Live = "", [string]$WcTest = "",
-      [string]$Until = "", [int]$Minutes = 15, [string]$Extra = "")
+      [string]$Until = "", [int]$Minutes = 15, [string]$Extra = "", [switch]$Graphics)
 
 $ErrorActionPreference = "Stop"
 $game = "D:\SteamLibrary\steamapps\common\FINAL FANTASY VI PR"
@@ -75,7 +77,31 @@ if (Test-Path $csv) { Remove-Item $csv }
 
 # only ever watch and stop the process started here: if you start the game yourself during
 # a run, the run stops its own game and leaves yours alone
-$proc = Start-Process -FilePath (Join-Path $game "FINAL FANTASY VI.exe") -ArgumentList "-batchmode", "-nographics" `
+# -Graphics: still no window (-batchmode), but with a graphics device, so the harness's "shot" can
+# render the game's picture to a PNG (the user, 2026-11-20: screenshots on the PC, not the Deck)
+# (a screen size: without a window the game sizes its pixel buffers from a tiny default screen)
+$gameArgs = if ($Graphics) { @("-batchmode", "-screen-width", "1920", "-screen-height", "1080", "-screen-fullscreen", "0") } else { @("-batchmode", "-nographics") }
+# the log's complete lines written since the last look: a warm game's log grows for hours (tools/test_batch.py keeps
+# a harness game up between batches), so not the whole file through Select-String every half second (2026-11-20)
+function Read-NewLogLines([string]$path, [ref]$pos) {
+    try {
+        $fs = [System.IO.File]::Open($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]'ReadWrite, Delete')
+        try {
+            if ($fs.Length -lt $pos.Value) { $pos.Value = 0 }
+            if ($fs.Length -le $pos.Value) { return @() }
+            $fs.Position = $pos.Value
+            $buf = New-Object byte[] ([int]($fs.Length - $pos.Value))
+            $n = $fs.Read($buf, 0, $buf.Length)
+            $cut = [Array]::LastIndexOf($buf, [byte]10, $n - 1)
+            if ($cut -lt 0) { return @() }
+            $pos.Value += $cut + 1
+            return [System.Text.Encoding]::UTF8.GetString($buf, 0, $cut + 1) -split "`r?`n"
+        } finally { $fs.Dispose() }
+    } catch { return @() }
+}
+$logPos = 0
+
+$proc = Start-Process -FilePath (Join-Path $game "FINAL FANTASY VI.exe") -ArgumentList $gameArgs `
     -WorkingDirectory $game -WindowStyle Hidden -PassThru
 $start = Get-Date
 $result = "timeout"
@@ -101,14 +127,26 @@ try {
             $result = "a window appeared: stopped the run's game"
             break
         }
-        if (@(Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $proc.Id }).Count -gt 0) {
+        $others = @(Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $proc.Id })
+        if ($others.Count -gt 0) {
             Stop-Process -Id $proc.Id -Force
-            $result = "the game was started by someone else: stopped the run (that game left alone)"
+            # who started it (2026-11-20: bnw-11's self-tests were stopped by a game nobody could account for)
+            $who = @($others | ForEach-Object {
+                $o = $_
+                try {
+                    $w = Get-CimInstance Win32_Process -Filter "ProcessId = $($o.Id)" -ErrorAction Stop
+                    $par = Get-CimInstance Win32_Process -Filter "ProcessId = $($w.ParentProcessId)" -ErrorAction SilentlyContinue
+                    $by = if ($par) { "$($par.Name) pid $($par.ProcessId): $("$($par.CommandLine)".Substring(0, [Math]::Min(200, "$($par.CommandLine)".Length)))" } else { "pid $($w.ParentProcessId) (gone)" }
+                    "pid $($o.Id) since $($w.CreationDate.ToString('HH:mm:ss')), started by $by"
+                } catch { "pid $($o.Id)" }
+            }) -join "; "
+            $result = "the game was started by someone else: stopped the run (that game left alone): $who"
             break
         }
-        if ((Test-Path $log) -and (Select-String -Path $log -Pattern $doneMark -Quiet)) {
+        if ((Test-Path $log) -and @(Read-NewLogLines $log ([ref]$logPos) | Where-Object { $_ -match $doneMark }).Count -gt 0) {
             $result = "probe finished"
-            Start-Sleep -Seconds 10
+            # the game quits by itself after "[probe] done": up to 10 s for it (no fixed wait)
+            for ($w = 0; $w -lt 20 -and -not $proc.HasExited; $w++) { Start-Sleep -Milliseconds 500; $proc.Refresh() }
             break
         }
     }
@@ -126,7 +164,7 @@ if ($WcTest) {
 }
 if ($Until) {
     Select-String -Path $log -Pattern "$Until|\[verify\]|\[patch\]|\[Error|Exception" | ForEach-Object { $_.Line }
-    Remove-Item (Join-Path $game "BepInExnw_probe.request") -ErrorAction SilentlyContinue
+    Remove-Item (Join-Path $game "BepInEx\bnw_probe.request") -ErrorAction SilentlyContinue
     exit
 }
 Select-String -Path $log -Pattern "\[probe\]|\[live\]" | Select-Object -Last 6 | ForEach-Object { $_.Line }

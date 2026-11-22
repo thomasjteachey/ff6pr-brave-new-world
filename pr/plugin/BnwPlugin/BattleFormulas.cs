@@ -16,9 +16,8 @@ namespace BraveNewWorld.PR
     //    Spirit (PR Vitality) where other spells use Magic. While the PR computes one of
     //    them (CalcControllerProvider.Get*Status with .ability on the list), a player's
     //    ConfirmedMagic answers with ConfirmedVitality;
-    //  * ATB speed (c2.asm:397): BNW fills characters' gauges at 75*(Spd+51)/16 and
-    //    monsters' at 112.5*(Spd+20)/16, where vanilla used 96*(Spd+20)/16 for both. The
-    //    PR's ATBCalc result is scaled by BNW / vanilla (logged, to confirm its shape).
+    //  * (ATB speed moved to AtbRules.cs on 2026-11-21: the kit's absolute SNES rate with BNW's
+    //    numbers; the ratio on the PR's own rate that was here ran ~19% slow for both sides.)
     //  * damage: the PR computes vanilla FF6's formulas (checked against logged fights:
     //    monster and character Fight, Cure, Fire with Shell/Safe x170/256). BNW's changes are
     //    applied as factors on the PR's result (CalcControllerProvider.GetFightStatus /
@@ -36,7 +35,7 @@ namespace BraveNewWorld.PR
     //      - the Windslash / Aero procs x1.5 two-handed, else x0.75 (c2.asm Wpn_Chk).
     static class BattleFormulas
     {
-        internal static bool Spirit = true, Atb = true, Damage = true;
+        internal static bool Spirit = true, Damage = true;
         static readonly Random Rng = new Random();
         // for the damage log: the PR's value and the factor applied to the last result
         [ThreadStatic] internal static int LastGameValue;
@@ -53,7 +52,6 @@ namespace BraveNewWorld.PR
                 Hooks.Patch(h, calc, m, typeof(BattleFormulas), prefix: nameof(Calc_Prefix), postfix: nameof(Calc_Postfix));
             Hooks.Patch(h, typeof(PlayerCharacterParameter), "ConfirmedMagic", typeof(BattleFormulas), postfix: nameof(Magic_Postfix));
             Hooks.Patch(h, typeof(EnemyCharacterParameter), "ConfirmedMagic", typeof(BattleFormulas), postfix: nameof(EnemyMagic_Postfix));
-            Hooks.Patch(h, typeof(BattleProgressATBFF6), "ATBCalc", typeof(BattleFormulas), postfix: nameof(Atb_Postfix));
             Hooks.Patch(h, calc, "GetFightStatus", typeof(BattleFormulas), postfix: nameof(Fight_Postfix));
             Hooks.Patch(h, calc, "GetMagicStatus", typeof(BattleFormulas), postfix: nameof(MagicDamage_Postfix));
             Hooks.Patch(h, calc, "GetRecoveryStatus", typeof(BattleFormulas), postfix: nameof(Recovery_Postfix));
@@ -71,6 +69,7 @@ namespace BraveNewWorld.PR
 
         [ThreadStatic] static int spellPower;
         static readonly HashSet<int> ToolItems = new HashSet<int> { 30, 31, 32, 33, 34, 35, 36, 37 };  // PR item ids
+        static readonly HashSet<int> RowTools = new HashSet<int> { 33, 35 };   // Chainsaw, Drill
 
         // monster heals: only the residual of the Magic x2/3 answer (below)
         public static void Recovery_Postfix(CalcControllerProvider __instance, ICalcResult __result)
@@ -106,7 +105,9 @@ namespace BraveNewWorld.PR
         const double VanillaMeanVariance = 0.9355;  // mean of 224..255 / 256
         const int BushidoType = 601;
         const int ShockType = 618;
-        static readonly HashSet<int> FightTypes = new HashSet<int> { 4, 15, 16 };  // Attack, Jump, Jump landing
+        // Attack, Jump, Jump landing, Mug's strike (608 StealAttack: BNW's Mug hits with its Fight formula)
+        static readonly HashSet<int> FightTypes = new HashSet<int> { 4, 15, 16, 608 };
+        const int MugType = 608;
 
         static void Adjust(CalcControllerProvider c, ICalcResult result, bool physical)
         {
@@ -147,6 +148,16 @@ namespace BraveNewWorld.PR
                              $"{(sketch ? $"Magic for Vigor {vigBnw}" : $"Vigor {vig}")}): x{bnw / vanilla:0.###} (BNW {bnw:0} / vanilla {vanilla:0})");
                     }
                 }
+                // BNW's -25% for an Offering and for two weapons covers Mug too (c2.asm PhysDmgJump: every command
+                // below Bushido); the PR's own corrections (types 0/1) apply to Attack (ability type 4) only
+                if (physical && userIsPlayer && ability != null && ability.TypeId == MugType && RelicRules.Enabled)
+                {
+                    bool offering = RelicRules.HasOffering(c.userCharaData), dual = RelicRules.DualWields(c.userCharaData);
+                    if (offering) f *= 0.75;
+                    if (dual) f *= 0.75;
+                    if (offering || dual)
+                        Note("mug-relics", $"Mug by {c.userCharaData.Name}: {(offering ? "Offering -25% " : "")}{(dual ? "two weapons -25%" : "")} (BNW)");
+                }
                 // Edgar's physical tools (Drill, Chainsaw, Auto Crossbow: PR items 33/35/37): BNW's
                 // PlayerPhys with the tool's power as Battle Power. Drill and Chainsaw ignoring
                 // Defense (BNW Drill_Saw, c2.asm 2038) is the game's own already
@@ -160,6 +171,13 @@ namespace BraveNewWorld.PR
                     double vanilla = VanillaFight(lv, bp, vig), bnw = BnwFight(lv, bp, vig);
                     if (vanilla > 0) f *= FormulaRatio(c, value, bnw, vanilla);
                     Note("tool", $"tool {tool.Id} (BP {bp}): x{bnw / Math.Max(1, vanilla):0.###}");
+                    // BNW's Drill and Chainsaw respect row (c2.asm C22B38 Drill_Saw: "Respect Row"); the PR's
+                    // machines all ignore it (GetFightStatus: IsMachine -> isIgnoreCorps), as vanilla's tools did
+                    if (RowTools.Contains(tool.Id) && c.userCorpsId == Last.Defaine.User.CorpsId.Back)
+                    {
+                        f *= 0.5;
+                        Note("tool-row", $"tool {tool.Id} from the back row: x0.5 (BNW: Drill and Chainsaw respect row)");
+                    }
                 }
                 // physical abilities other than Fight and Bushido (Blitzes, BNW's physical spells, now
                 // Physical functions in the port): the game's Fight formula with the spell power as
@@ -248,6 +266,15 @@ namespace BraveNewWorld.PR
                         Note("defend", $"{c.targetCharaData.Name} defending: magic damage halved");
                     }
                 }
+                // a hit in the back: vanilla's damage incrementor +50% (C2/3447: target in $3A54), which
+                // BNW removes (c2.asm 2275, "Back-attack damage increment is removed"; the hit-in-back
+                // sure hit stays). The PR keeps it in PhysicalExecution ("後ろ向き補正": x1.5 when
+                // CalcInfo.isSideAttack, the same flag as its "attacked from behind: sure hit")
+                if (physical && BackHit(c))
+                {
+                    f /= 1.5;
+                    Note("back-hit", "hit in the back: the game's x1.5 removed (BNW)");
+                }
                 if (!physical) f *= MonsterResidual(c, spellPower);
                 // BNW caps after its variance: a value the game already capped stays capped by it
                 if (value >= 9999 && fVariance != 1.0) f /= fVariance;
@@ -261,6 +288,14 @@ namespace BraveNewWorld.PR
         }
 
         internal static int Shock(int lv, int sta, int hp, bool backRow) => BattleMath.Shock(lv, sta, hp, backRow);
+
+        internal static bool BackAttackRule = true;
+        static bool BackHit(CalcControllerProvider c)
+        {
+            if (!BackAttackRule) return false;
+            var ci = c.calcInfo;
+            return ci != null && ci.isSideAttack;
+        }
 
         // a sketched attack: the PR makes the sketcher (Relm) the attacker of the monster's ability,
         // under the Sketch command; BNW then takes her Magic for Vigor in physical hits (c2.asm
@@ -277,6 +312,7 @@ namespace BraveNewWorld.PR
         sealed class ShockUse { public int Frame, Hp; public BattleUnitData Unit; public bool Charged; }
         static readonly Dictionary<IntPtr, ShockUse> shocks = new Dictionary<IntPtr, ShockUse>();
         static bool shockPending;
+        internal static (int Was, int Now, int Cost)? LastShockCost;   // tests: the last cost charged
 
         static int ShockUserHp(CalcControllerProvider c, CharacterParameterBase a)
         {
@@ -306,6 +342,7 @@ namespace BraveNewWorld.PR
                     int was = p.CurrentHP, cost = BattleMath.ShockCost(p.ConfirmedMaxHp());
                     int now = Math.Max(0, was - cost);
                     p.CurrentHP = now;
+                    LastShockCost = (was, now, cost);
                     if (now == 0)
                         BattlePlugManager.Instance()?.BattleConditionController?.InterruptAddCondition(s.Unit, ConditionType.UnableFight);
                     Hooks.NoteOnce("shock-cost", () => $"[formulas] Shock's cost: user HP {was} -> {now} (max HP / 8 = {cost})");
@@ -322,7 +359,7 @@ namespace BraveNewWorld.PR
         // fighters (the user's Deck: BP 1 for a moogle with a 125-BP weapon: BNW/vanilla x4.6, an
         // 851 critical on the Moogle Defense's Captain; Terra BP 32 for 107). Now: the stronger hand,
         // or with two weapons the hand of this strike's (the weaker one's when it's the weaker).
-        static int StrikeBattlePower(CalcControllerProvider c, PlayerCharacterParameter pp, CharacterParameterBase a)
+        internal static int StrikeBattlePower(CalcControllerProvider c, PlayerCharacterParameter pp, CharacterParameterBase a)
         {
             if (pp == null) return a.ConfirmedAttack();
             int right = pp.GetArmConfirmedAttack(BattleActData.ArmType.Right), left = pp.GetArmConfirmedAttack(BattleActData.ArmType.Left);
@@ -528,25 +565,6 @@ namespace BraveNewWorld.PR
                 Hooks.NoteOnce("spirit-magic", () => $"[formulas] Spirit-based ability: caster's Magic {magic} -> Spirit {spirit}");
             }
             catch (Exception e) { Hooks.WarnOnce("BattleFormulas.Magic", e); }
-        }
-
-        // --- ATB speed -----------------------------------------------------------------------
-
-        public static void Atb_Postfix(BattleProgressATBFF6 __instance, BattleUnitData battleUnitData, ref float __result)
-        {
-            if (!Atb || battleUnitData == null || __result <= 0f || !Hooks.IsA<BattleProgressATBFF6>(__instance)) return;
-            try
-            {
-                bool player = battleUnitData.TryCast<BattlePlayerData>() != null;
-                int speed = battleUnitData.BattleUnitDataInfo?.Parameter?.ConfirmedAgility() ?? 0;
-                double ratio = player ? 75.0 * (speed + 51) / (96.0 * (speed + 20)) : 112.5 / 96.0;
-                float was = __result;
-                __result = (float)(was * ratio);
-                float now = __result;
-                Hooks.NoteOnce("atb-" + (player ? "player" : "enemy") + "-" + (speed / 10),
-                    () => $"[formulas] ATB {(player ? "character" : "monster")} speed {speed}: game {was:0.###} -> BNW {now:0.###} (x{ratio:0.###})");
-            }
-            catch (Exception e) { Hooks.WarnOnce("BattleFormulas.Atb", e); }
         }
     }
 }

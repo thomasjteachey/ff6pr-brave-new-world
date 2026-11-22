@@ -4,17 +4,20 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using BraveNewWorld.Rules;
+using PrKit;
 
 // Tiny test runner: each Test() prints PASS/FAIL; exit code = number of failures.
 static class Program
 {
     static int failures, passes;
     static BnwData D;
+    static string DataPath;
 
     static int Main(string[] args)
     {
         var path = args.Length > 0 ? args[0] : FindData();
         Console.WriteLine($"data: {path}");
+        DataPath = path;
         D = BnwData.Load(path);
 
         Test("data shape", DataShape);
@@ -48,6 +51,11 @@ static class Program
         Test("Spirit-based abilities and special multipliers", SpiritData);
         Test("Shock and the two-handed grip", ShockAndGrip);
         Test("Sketch's Magic and True Knight cover", SketchAndCover);
+        Test("BNW's elemental share (multi-element attacks)", ElementShareRule);
+        Test("monster images from this PC's game", MonsterImagesFromGame);
+        Test("BNW's join levels (no averaging, World of Ruin floors)", JoinLevelRule);
+        Test("BNW's ATB numbers and command waits in seconds (Speed Balance, C2/067B)", AtbWaits);
+        Test("audit batch B data (Stamina-only evasion, fractional on bosses, respect row, 0 MP deaths)", AuditData);
 
         Console.WriteLine($"\n{passes} passed, {failures} failed");
         return failures;
@@ -382,7 +390,10 @@ static class Program
         foreach (var t in D.BossTests)
         {
             True(t.Parties.Length > 0, $"boss {t.SnesId} has a formation to start");
-            True(t.Parties.All(p => p > 0 && p < 2000), $"boss {t.SnesId}: the game's own formations, not the porter's");
+            // the game's own formations, or the ones made for BNW's story fights (port_events: 7000 + the PR's
+            // event party, BNW's line-up there, the Cranes' 7441; port_ai.new_fights: 8000 + formation, fights
+            // the PR has no party for, Kaiser's 8410), not the porter's random encounters (2000+)
+            True(t.Parties.All(p => p > 0 && (p < 2000 || p >= 7000 && p < 9000)), $"boss {t.SnesId}: the game's own formations, not the porter's");
         }
         Eq(D.BossTests.Count, D.BossTests.Select(t => t.SnesId).Distinct().Count(), "no duplicates");
     }
@@ -509,7 +520,18 @@ static class Program
         Eq("Dirty Undies", N(L("NonEncountItemId").Bnw), "no-encounter BNW");
         Eq("Mystery Egg", N(L("EncountDownItemId").Bnw), "half-encounter BNW");
         Eq("", N(L("HealingItemId").Bnw), "walking regen removed");
-        Eq("Atlas Armlet, Hero Ring", N(L("PhysicalCorrectionAccessoryIds").Vanilla), "physical boost vanilla");
+        // GetAccessoryPhysicalCorrectionValue's dictionary: one list per type (a list with no key, from
+        // an older bnw_data.json, rewrote every type with the Atlas Armlet's items)
+        HardList P(int key) => D.HardItems.First(h => h.Member == "PhysicalCorrectionAccessoryIds" && h.Key == key);
+        Eq(4, D.HardItems.Count(h => h.Member == "PhysicalCorrectionAccessoryIds"), "one list per physical correction type");
+        Eq("Offering", N(P(0).Vanilla), "type 0 vanilla");
+        Eq("Daryl's Soul", N(P(0).Bnw), "type 0 BNW: Daryl's Soul, the only Offering accessory");
+        Eq("Genji Glove", N(P(1).Vanilla), "type 1 vanilla");
+        Eq("", N(P(1).Bnw), "type 1 BNW: dual wield is a weapon property");
+        Eq("Atlas Armlet, Hero Ring", N(P(2).Vanilla), "physical boost vanilla");
+        Eq("Gauntlet", N(P(3).Vanilla), "type 3 vanilla");
+        Eq("", N(P(3).Bnw), "type 3 BNW: the grip is a weapon property");
+        True(P(2).Bnw.Length > 0 && P(2).Bnw.All(i => i.ItemId >= 93), "type 2 BNW: accessories");
         True(!L("MagicCorrectionAccessoryIds").Bnw.Any(i => i.Name is "Earrings" or "Hero Ring"), "magic boost leaves Earrings/Hero Ring");
         Eq("", N(L("bloodSwordId").Bnw), "no drain weapon in BNW");
         foreach (var h in D.HardItems)
@@ -517,6 +539,60 @@ static class Program
                 True(i.ItemId > 0 && i.ContentId > 0, $"{h.Member} {i.Name}: ids {i.ItemId}/{i.ContentId}");
         Eq(0, D.Passives["exp_x2"].Length, "BNW has no x2 EXP item");
         Eq(0, D.Passives["gil_x2"].Length, "BNW has no x2 gil item");
+    }
+
+    static void JoinLevelRule()
+    {
+        int T(int id, bool first, bool wor, int avg) => JoinRules.Target(id, first, wor, avg);
+        // first joins: the average + BNW's offset (0; Gogo -3, Umaro +5), clamped 1-99
+        Eq(14, T(2, true, false, 14), "Locke's first join: the average (vanilla +2)");
+        Eq(11, T(JoinRules.Gogo, true, false, 14), "Gogo: average - 3");
+        Eq(19, T(JoinRules.Umaro, true, false, 14), "Umaro: average + 5");
+        Eq(1, T(JoinRules.Gogo, true, false, 2), "never below 1");
+        Eq(99, T(JoinRules.Umaro, true, false, 97), "never above 99");
+        Eq(21, T(11, true, true, 12), "Mog first met in the World of Ruin: his rejoin floor 21");
+        Eq(9, T(JoinRules.Gogo, true, true, 12), "Gogo's first join has no floor");
+        // World of Balance rejoins: kept level, but Shadow and Setzer average (the PR's own)
+        Eq(0, T(1, false, false, 30), "Terra after the IMTRF: no averaging");
+        Eq(0, T(2, false, false, 30), "Locke after the banquet: no averaging");
+        Eq(-1, T(JoinRules.Shadow, false, false, 30), "Shadow at Kohlingen: averaged");
+        Eq(-1, T(JoinRules.Setzer, false, false, 30), "Setzer: averaged");
+        // World of Ruin rejoins: the floor, whatever the average
+        Eq(21, T(8, false, true, 40), "Strago at the Cultists' Tower: 21");
+        Eq(18, T(6, false, true, 5), "Sabin: 18");
+        Eq(19, T(5, false, true, 30), "Edgar: 19");
+        Eq(20, T(JoinRules.Setzer, false, true, 30), "Setzer: 20");
+        Eq(18, T(7, false, true, 30), "Celes: 18");
+        Eq(-1, T(15, false, true, 30), "guests: the PR's own");
+    }
+
+    static void ElementShareRule()
+    {
+        const int N = BattleMath.ElemNormal, W = BattleMath.ElemWeak, H = BattleMath.ElemHalf, X = BattleMath.ElemNull, A = BattleMath.ElemAbsorb;
+        int S(params int[] t) => BattleMath.ElementShare(t);
+        // one element: the game's own rule
+        Eq(N, S(N), "normal"); Eq(W, S(W), "weak"); Eq(H, S(H), "half"); Eq(X, S(X), "immune"); Eq(A, S(A), "absorb");
+        // two elements (points / 2 against 2)
+        Eq(N, S(W, X), "weak + immune = normal (vanilla: no damage)");
+        Eq(N, S(W, H), "weak + resist: 5 / 2 = 2 = normal");
+        Eq(W, S(W, N), "weak + normal: 6 / 2 = 3 > 2 = double");
+        Eq(H, S(N, X), "normal + immune = half (vanilla: no damage)");
+        Eq(H, S(H, X), "resist + immune = half");
+        Eq(X, S(X, X), "both immune = no damage");
+        Eq(A, S(W, A), "an absorbed element heals");
+        Eq(W, S(H, H, W, W), "1 + 1 + 4 + 4 = 10, 5 > 4 = double");
+        Eq(N, S(H, H, W), "resist + resist + weak: 6 / 2 = 3 = 3 elements = normal");
+        Eq(H, S(N, N, X), "normal + normal + immune: 4 / 2 = 2 < 3 = half");
+        // the table the game reads: one element carries the outcome, the other attack elements normal
+        var table = new Dictionary<int, int> { [1] = W, [2] = X, [5] = H };
+        var view = BattleMath.ElementView(table, new[] { 1, 2 });
+        True(view != null && !view.ContainsKey(1) && !view.ContainsKey(2) && view[5] == H, "weak + immune -> both normal, others kept");
+        view = BattleMath.ElementView(table, new[] { 2, 3 });
+        True(view != null && view[2] == H && !view.ContainsKey(3), "immune + normal -> half on the first");
+        view = BattleMath.ElementView(table, new[] { 1, 3 });
+        True(view != null && view[1] == W && !view.ContainsKey(3), "weak + normal -> the weak element stays weak");
+        True(BattleMath.ElementView(table, new[] { 1 }) == null, "one element: the game's own rule");
+        True(BattleMath.ElementView(new Dictionary<int, int> { [1] = A }, new[] { 1, 2 }) == null, "absorb: the game's own rule");
     }
 
     static void CommandWaitTimes()
@@ -588,6 +664,12 @@ static class Program
         var two = new List<BattleMath.CoverGuardInfo> { G(hp: 800), G(hp: 1200), G(hp: 1200, back: true) };
         Eq(1, BattleMath.CoverGuard(true, false, two, low), "the front-row guard with the most HP");
         Eq(1, BattleMath.CoverGuard(true, false, new List<BattleMath.CoverGuardInfo> { G(hp: 900), G(hp: 900) }, low), "equal HP: the later one");
+        // the covering knight's Evade (HalveEvasion over vanilla's block value C2/2861)
+        Eq(0, BattleMath.CoverEvade(0), "Evade 0 stays 0");
+        Eq(0, BattleMath.CoverEvade(1), "Evade 1 -> 0");
+        Eq(20, BattleMath.CoverEvade(41), "Evade 41 -> 20");
+        Eq(63, BattleMath.CoverEvade(127), "Evade 127 -> 63");
+        Eq(63, BattleMath.CoverEvade(128), "Evade 128 -> 63 (the block value bottoms out at 1)");
     }
 
     static void BonusLines()
@@ -595,5 +677,112 @@ static class Program
         Eq("EL: +2 Vigor   Equip: Halves Bolt damage", EsperRules.BonusLine(D, E("Ramuh")), "format");
         foreach (var e in D.Espers.Where(e => e.Name != "Loki"))
             True(EsperRules.BonusLine(D, e).Length is > 10 and < 70, $"{e.Name}: '{EsperRules.BonusLine(D, e)}'");
+    }
+
+    // BNW's monster images (the kit's PrKit/MonsterImages.cs) made from this PC's game into a scratch folder:
+    // every image the recipe names is made, with the pixels the porter made (its sha1), as a PNG
+    // + .spriteData + keys/Export.json per group; a second run only checks the marker.
+    // FF6PR_GAME (else the default Steam library) is the game; skipped without the game or a recipe.
+    static void MonsterImagesFromGame()
+    {
+        var recipe = MonsterImageRecipe.FromJson(File.ReadAllText(DataPath), "monster_images");
+        var game = Environment.GetEnvironmentVariable("FF6PR_GAME") ?? @"D:\SteamLibrary\steamapps\common\FINAL FANTASY VI PR";
+        if (recipe == null || !Directory.Exists(Path.Combine(game, MonsterImages.BundleDir)))
+        {
+            Console.WriteLine("      (skipped: " + (recipe == null ? "no monster_images in bnw_data.json" : "no game at " + game) + ")");
+            return;
+        }
+        var dir = Path.Combine(Path.GetTempPath(), "bnw_monster_images_test");
+        if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        var warnings = new List<string>();
+        var line = MonsterImages.Ensure(game, dir, recipe, warnings.Add);
+        Console.WriteLine("      " + line);
+        Eq(0, warnings.Count, "warnings (" + string.Join("; ", warnings) + ")");
+        foreach (var img in recipe.Images)
+        {
+            var png = MonsterImages.PngPath(dir, img);
+            True(File.Exists(png) && File.Exists(Path.ChangeExtension(png, ".spriteData")), img.Key + " written");
+            var b = File.ReadAllBytes(png);
+            True(b[1] == (byte)'P' && b[2] == (byte)'N' && b[3] == (byte)'G', img.Key + " is a PNG");
+            True(File.ReadAllText(Path.Combine(dir, img.Group, "keys", "Export.json")).Contains("/" + img.Key + "\""), img.Key + " in its group's keys");
+            if (img.Thumb == null) continue;
+            True(File.Exists(MonsterImages.ThumbPngPath(dir, img.Thumb)), img.Thumb.Group + " thumbnail written");
+            True(File.ReadAllText(Path.Combine(dir, img.Thumb.Group, "keys", "Export.json")).Contains("/Thumbnail\""), img.Thumb.Group + " keys");
+        }
+        True(MonsterImages.UpToDate(dir, recipe), "marker");
+        True(MonsterImages.Ensure(game, dir, recipe, warnings.Add).EndsWith("up to date"), "second start skips");
+        // the final battle tower: its statue parts are layers the plugin erases when they die; without them
+        // the picture differs only where a part is (BnwMonsterImages.Track)
+        var tower = recipe.Images.FirstOrDefault(i => i.Parts != null && i.Parts.Count > 0);
+        if (tower == null) return;
+        var cache = new Dictionary<string, Dictionary<string, BundleTexture>>();
+        var full = MonsterImages.Build(game, tower, cache, warnings.Add);
+        var bare = MonsterImages.BuildBase(game, tower, cache, warnings.Add);
+        var under = new bool[tower.W * tower.H];
+        foreach (var part in tower.Parts)
+        {
+            var layer = MonsterImages.PartLayer(tower, part);
+            int n = 0;
+            for (int k = 0; k < under.Length; k++) if (layer[4 * k + 3] != 0) { under[k] = true; n++; }
+            True(n > 20, $"part {part.Monster}: {n} pixels");
+        }
+        int outside = 0, inside = 0;
+        for (int k = 0; k < under.Length; k++)
+        {
+            bool same = full[4 * k] == bare[4 * k] && full[4 * k + 1] == bare[4 * k + 1] && full[4 * k + 2] == bare[4 * k + 2];
+            if (!under[k] && !same) outside++;
+            if (under[k] && !same) inside++;
+        }
+        Eq(0, outside, "tower: pixels that differ without the parts outside them");
+        True(inside > 1000, $"tower: {inside} pixels change when the parts go");
+    }
+    // BNW's waits at its own ATB rate (Rules/BnwAtb.cs): worked by hand from c2.asm C2/09D2 and C2/1193 (wait timer
+    // += ($3AC8 = 75 x (Speed + 51) / 16) / 2 a tick, done at wait x 256; 30.0494 ticks a second)
+    static void AtbWaits()
+    {
+        BnwAtb.UseBnwNumbers();
+        Eq(379, PrKit.Ff6.SnesAtbRules.AtbAdd(30, false, 2, false, false), "a Speed 30 character's add: 75 x 81 / 16");
+        Eq(350, PrKit.Ff6.SnesAtbRules.AtbAdd(30, true, 2, false, false), "a Speed 30 monster's add: 112 x 50 / 16");
+        Eq(393, PrKit.Ff6.SnesAtbRules.AtbAdd(33, false, 2, false, false), "a Speed 33 character's add: 75 x 84 / 16");
+        const double Tps = 60.0988 / 2;
+        void Secs(double ticks, int wait, int speed, bool haste, bool slow, string what)
+        {
+            double got = BnwAtb.Seconds(wait, speed, haste, slow);
+            True(Math.Abs(got - ticks / Tps) < 1e-9, $"{what}: expected {ticks / Tps:0.0000} s ({ticks} ticks), got {got:0.0000}");
+        }
+        Secs(21, 16, 33, false, false, "Fight at Speed 33: 4096 / 196 -> 21 ticks (0.70 s; the PR's own chant 1.64 s)");
+        Secs(42, 32, 33, false, false, "Magic at Speed 33: 8192 / 196 -> 42 ticks");
+        Secs(84, 64, 33, false, false, "Summon at Speed 33: 16384 / 196 -> 84 ticks");
+        Secs(147, 112, 33, false, false, "Jump's air time at Speed 33: 28672 / 196 -> 147 ticks");
+        Secs(18, 16, 33, true, false, "Fight with Haste: 90 x 84 / 16 = 472, 4096 / 236 -> 18 ticks");
+        Secs(27, 16, 33, false, true, "Fight with Slow: 60 x 84 / 16 = 315, 4096 / 157 -> 27 ticks");
+        Secs(27, 16, 33, true, true, "Slow wins over Haste");
+        Secs(0, 0, 33, false, false, "Steal: no wait");
+        var t = D.Waits;
+        int w;
+        Eq(BnwAtb.Wait.Timed, BnwAtb.WaitFor(t, 0, t.FightCommandId, false, false, false, false, false, false, out w), "Fight waits");
+        Eq(16, w, "Fight's wait $10");
+        Eq(BnwAtb.Wait.Timed, BnwAtb.WaitFor(t, t.SummonAbilityType, 7, false, false, false, false, false, false, out w), "a summon waits");
+        Eq(64, w, "Summon's wait $40 (the summon's own, not Magic's)");
+        Eq(BnwAtb.Wait.Timed, BnwAtb.WaitFor(t, PrKit.Ff6.SnesAtbRules.LandingAbility, BnwAtb.JumpCommand, false, false, false, false, false, false, out w), "Jump's landing");
+        Eq(112, w, "Jump's air time $70 (vanilla $E0)");
+        Eq(BnwAtb.Wait.Now, BnwAtb.WaitFor(t, PrKit.Ff6.SnesAtbRules.UpAtOnceAbility, BnwAtb.JumpCommand, false, false, false, false, false, false, out w), "Jump goes up at once");
+        Eq(BnwAtb.Wait.Game, BnwAtb.WaitFor(t, 0, t.FightCommandId, true, false, false, false, false, false, out w), "a monster: the game's");
+        Eq(BnwAtb.Wait.Now, BnwAtb.WaitFor(t, 0, t.FightCommandId, false, false, true, false, false, false, out w), "a Berserk/Muddle turn: at once");
+        Eq(BnwAtb.Wait.Timed, BnwAtb.WaitFor(t, 0, 7, false, false, false, false, false, true, out w), "a Mimic: Mimic's wait");
+        Eq(0, w, "BNW's Mimic: no wait");
+        Eq(BnwAtb.Wait.Unknown, BnwAtb.WaitFor(t, 0, 999, false, false, false, false, false, false, out w), "a command the table lacks");
+    }
+    // the lists AuditRules reads (bnw_plugin_data from BNW's ROM; the asm rules in AuditRules.cs)
+    static void AuditData()
+    {
+        var first = D.StaminaFirstAbilities;
+        foreach (int id in new[] { 62, 63, 66, 147, 185, 315, 334, 342, 349, 351, 361, 368, 369 })
+            True(first.Contains(id), $"Stamina-only evasion for ability {id} (StamPhase: fractional / MP / North Cross)");
+        Eq(8, D.BossFractional.TryGetValue(62, out var demi) ? demi : -1, "Demi's power on a boss");
+        Eq(12, D.BossFractional.TryGetValue(63, out var quartr) ? quartr : -1, "Quartr's power on a boss");
+        True(!D.BossFractional.ContainsKey(342), "Launcher (special effect $2C) keeps the PR's boss rule");
+        Eq("124 127 130 132 133 139", string.Join(" ", D.RespectRowAbilities.OrderBy(x => x)), "BNW's physical respect-row skills");
+        True(D.DieAtZeroMp.Count >= 47, $"monsters dying at 0 MP: {D.DieAtZeroMp.Count} (47 SNES monsters + Coliseum copies)");
     }
 }

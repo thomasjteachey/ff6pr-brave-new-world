@@ -105,6 +105,31 @@ namespace BraveNewWorld.PR
             catch (Exception e) { Hooks.WarnOnce("SetMagicStone", e); return true; }
         }
 
+        // An old save (a vanilla PR save, which BNW's own saves start as: ModSaves copies them at the mod's
+        // first start) can have an esper equipped that BNW doesn't allow that character; BNW's own menus
+        // can't (SetMagicStone_Prefix). Checked every few seconds outside battle, taken off the game's way.
+        internal static void UnequipDisallowed()
+        {
+            if (!Restrict || D == null) return;
+            try
+            {
+                var list = UserDataManager.Instance()?.OwnedCharacterList;
+                if (list == null || list.Count == 0) return;
+                var battle = Last.Battle.BattlePlugManager.Instance();
+                if (battle != null && battle.IsBattle()) return;
+                OwnedCharacterClient client = null;
+                foreach (var c in list)
+                {
+                    if (c == null || c.MagicStoneId <= 0 || EsperRules.CanEquip(D, c.characterStatusId, c.MagicStoneId)) continue;
+                    var name = D.EsperByContent(c.MagicStoneId)?.Name;
+                    client ??= new OwnedCharacterClient();
+                    client.RemoveMagicStone(c.Id);
+                    Plugin.L.LogInfo($"[espers] {c.Name} had {name} equipped, which BNW doesn't allow: taken off (an old save)");
+                }
+            }
+            catch (Exception e) { Hooks.WarnOnce("UnequipDisallowed", e); }
+        }
+
         // --- 2. vanilla level-up bonuses off, BNW bonus text on --------------------------
 
         public static void ParameterType_Postfix(Serial.FF6.Management.MagicStoneData __instance, ref ParameterType __result)
@@ -130,6 +155,9 @@ namespace BraveNewWorld.PR
 
         // --- 3. EP and Esper Levels after battle -----------------------------------------
 
+        // the characters whose EL went up in the last battle, for the victory screen (EsperResultRows)
+        internal static readonly List<string> ElGains = new List<string>();
+
         public static void BattleResult_Postfix(BattleResultProvider __instance, BattleResultData __result, int expValue)
         {
             if (!Levels || __result == null || !Hooks.IsA<BattleResultProvider>(__instance)) return;
@@ -138,6 +166,7 @@ namespace BraveNewWorld.PR
                 int sp = Math.Max(__result.GetMp, __result.GetAbp);
                 Hooks.NoteOnce("result-fields", () => $"[espers] battle result: exp={expValue} GetExp={__result.GetExp} GetMp={__result.GetMp} GetAbp={__result.GetAbp}");
                 if (!EsperStore.Available) return;
+                ElGains.Clear();
                 foreach (var c in __result.CharacterList)
                 {
                     var after = c?.AfterData;
@@ -156,6 +185,13 @@ namespace BraveNewWorld.PR
                         if (added != null) spent.Add(added.ToString());
                     }
                     if (esper != null) EsperStore.Put(sid, p);
+                    if (gained > 0)
+                    {
+                        ElGains.Add(after.Name);   // BNW: "<name> gained an EL" (EsperResultRows)
+                        // the result menu draws a sentence row for a flagged character (its job level-up row,
+                        // which FF6 never uses): EsperResultRows writes BNW's line into it
+                        c._IsJobProficiencyLevelUp_k__BackingField = true;
+                    }
                     if (gained > 0)
                         Plugin.L.LogInfo($"[espers] {after.Name}: EL {before} -> {p.El} (EP {p.Ep}, {p.ElBank} to spend) with {esper?.Name}" +
                                          (spent.Count > 0 ? $": auto-spent {string.Join(", ", spent)}" : ""));

@@ -103,8 +103,11 @@ namespace BraveNewWorld.PR
             catch (Exception e) { Hooks.WarnOnce("RelicRules.Grip", e); }
         }
 
+        internal static bool TestGrip;   // tests: the character counts as gripping (the game's own check)
+
         public static void HasTwohand_Postfix(ref bool __result)
         {
+            if (TestGrip) __result = true;
             if (attackDepth <= 0 || !__result || !Enabled || FormulaProbe.Active) return;
             gripSeen = true;
             __result = false;
@@ -124,6 +127,7 @@ namespace BraveNewWorld.PR
         internal static bool HasGripWeapon(OwnedCharacterData c) => HasAbility(c, GripAbility);
 
         internal static bool DualWields(OwnedCharacterData c) => DualWielding(c);
+        internal static bool HasOffering(OwnedCharacterData c) => HasAbility(c, OfferingAbility);
 
         // Once a save is loaded: each character holding a grip weapon, whether the game says it
         // grips it, and its attack with BNW's x1.5 beside the game's own (null until loaded).
@@ -371,8 +375,10 @@ namespace BraveNewWorld.PR
                 var abilities = ownedCharacterData.EquipmentAbilitys;
                 string has = abilities == null ? "?" : $"two-hand {abilities.Contains(251)}, dual {abilities.Contains(252)}, offering {abilities.Contains(253)}";
                 Hooks.NoteOnce("phys-boost-" + physicalType, () => $"[relics] physical correction {physicalType}: game value {was} for {ownedCharacterData.Name} ({has})");
-                // BNW's -25%s: the game multiplies Fight damage by these when they're above 0
-                if (physicalType == CalcExecuteCorrection.PhysicalType.PilgrimsPassport && __result <= 0f
+                // BNW's -25%s: the game multiplies Fight damage by these when they're above 0. Offering:
+                // one -25% from an Offering weapon or Daryl's Soul (both give ability 253; HardItems puts
+                // Daryl's Soul on the game's Offering list, which gives the PR's x0.5)
+                if (physicalType == CalcExecuteCorrection.PhysicalType.PilgrimsPassport
                     && HasAbility(ownedCharacterData, OfferingAbility))
                     __result = 0.75f;
                 else if (physicalType == CalcExecuteCorrection.PhysicalType.GenchisBasho && __result <= 0f

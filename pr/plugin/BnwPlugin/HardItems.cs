@@ -113,7 +113,7 @@ namespace BraveNewWorld.PR
             if (!Enabled || D == null || settled.Count >= D.HardItems.Count) return;
             foreach (var list in D.HardItems)
             {
-                var key = list.Type + "." + list.Member;
+                var key = list.Type + "." + list.Name;
                 if (settled.Contains(key)) continue;
                 try
                 {
@@ -198,8 +198,16 @@ namespace BraveNewWorld.PR
                 {
                     var dict = prop.GetValue(null) as Il2CppSystem.Collections.Generic.Dictionary<int, Il2CppStructArray<int>>;
                     if (dict == null) return false;
+                    // a list for one key (GetAccessoryPhysicalCorrectionValue's types each have their
+                    // own items: Offering, Genji Glove, Atlas Armlet, Gauntlet), else every key
                     var keys = new List<int>();
-                    foreach (var k in dict.Keys) keys.Add(k);
+                    foreach (var k in dict.Keys)
+                        if (list.Key == null || list.Key == k) keys.Add(k);
+                    if (list.Key is int only && keys.Count == 0)
+                    {
+                        Plugin.L.LogWarning($"[items] {key}[{only}]: no such key in the game; left alone");
+                        return true;
+                    }
                     bool all = true;
                     foreach (var k in keys)
                     {
@@ -208,7 +216,8 @@ namespace BraveNewWorld.PR
                         if (want == null) { all &= space != null; continue; }
                         if (values.SequenceEqual(want)) continue;
                         dict[k] = new Il2CppStructArray<int>(want);
-                        Plugin.L.LogInfo($"[items] {key}[{k}]: [{string.Join(", ", Names(list.Vanilla, values))}] -> [{string.Join(", ", Names(list.Bnw))}] ({space} ids)");
+                        Plugin.L.LogInfo($"[items] {key}[{k}]: [{string.Join(", ", Names(list.Vanilla, values))}] -> " +
+                                         (want.Length == 0 ? "[] (no such accessory in BNW)" : $"[{string.Join(", ", Names(list.Bnw))}] ({space} ids)"));
                     }
                     return all;
                 }

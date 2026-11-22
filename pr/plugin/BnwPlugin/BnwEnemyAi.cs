@@ -20,6 +20,8 @@ namespace BraveNewWorld.PR
             public override SnesAiData Data => D;
             public override string Tag => "bnw";
             public override bool Verbose => FormulaProbe.Running || PrKit.TestRun.Running;   // BNW's headless runs log every turn
+            // the scripts' timers on BNW's battle clock: held in Wait's menus and while nATB holds time, x2 under Quickfill
+            public override float BattleClockDt() => PrKit.Ff6.SnesBattleClock.Dt();
         }
 
         internal static SnesAiData Data;

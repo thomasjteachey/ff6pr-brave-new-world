@@ -94,7 +94,9 @@ namespace BraveNewWorld.Rules
     public sealed class HardList
     {
         public string Type = "", Member = "", Kind = "";  // kind: id, array, dict
+        public int? Key;   // dict: the one key this list is for (null: every key)
         public HardItem[] Vanilla = Array.Empty<HardItem>(), Bnw = Array.Empty<HardItem>();
+        public string Name => Member + (Key is int k ? $"[{k}]" : "");
     }
 
     // A boss fight that runs BNW's AI, for the F9 boss test.
@@ -115,6 +117,10 @@ namespace BraveNewWorld.Rules
         public HashSet<int> SpiritEvadeAbilities = new HashSet<int>();   // Spirit can evade their status
         public HashSet<int> PhysicalSpells = new HashSet<int>();         // spell byte 2 bit 0: Defense, not MDef
         public HashSet<int> WeaponFlagSpells = new HashSet<int>();       // byte 7 bit 3: x1.5 two-handed, else x0.75
+        public HashSet<int> StaminaFirstAbilities = new HashSet<int>();  // Stamina is their only evasion (c0.asm StamPhase)
+        public Dictionary<int, int> BossFractional = new Dictionary<int, int>();  // fractional spells -> BNW power vs bosses (C2/50F4)
+        public HashSet<int> RespectRowAbilities = new HashSet<int>();    // physical skills halved from the back row (C2/3392)
+        public HashSet<int> DieAtZeroMp = new HashSet<int>();            // PR monster ids that die at 0 MP (byte $12 bit 0)
         public Dictionary<int, int> BaseBp = new Dictionary<int, int>();  // character_status id -> base Battle Power
         public Dictionary<int, double> SpecialMultipliers = new Dictionary<int, double>();  // monster specials
         public List<HardList> HardItems = new List<HardList>();
@@ -127,6 +133,9 @@ namespace BraveNewWorld.Rules
         public int SketchCommandId;
         public int[] UmaroColumns = Array.Empty<int>();       // ability ids: Fight, Tackle, Snowstorm, toss
         public int[][] UmaroRows = Array.Empty<int[]>();       // per relic set: weights of 255, 255 = not available
+        // the Coliseum (tools/seed_info.coliseum rows: wager content, vanilla party, vanilla reward, party, reward, hidden, monster)
+        public int[][] ColiseumRows = Array.Empty<int[]>();
+        public int[] NoSuplex = Array.Empty<int>();             // PR monster ids Suplex misses (SNES byte $13 bit 2; Coliseum copies too)
         // "runic" / "bushido" -> weapon content ids that allow the command (vanilla's, BNW's)
         public Dictionary<string, (int[] Vanilla, int[] Bnw)> CommandWeapons = new Dictionary<string, (int[], int[])>();
         public List<StatBonus> ElBonuses = new List<StatBonus>();
@@ -232,17 +241,26 @@ namespace BraveNewWorld.Rules
                     d.PhysicalSpells = new HashSet<int>(Ints(ph));
                 if (spirit.TryGetProperty("weapon_flag_abilities", out var wf))
                     d.WeaponFlagSpells = new HashSet<int>(Ints(wf));
+                if (spirit.TryGetProperty("stamina_first_abilities", out var sf))
+                    d.StaminaFirstAbilities = new HashSet<int>(Ints(sf));
+                if (spirit.TryGetProperty("respect_row_abilities", out var rr))
+                    d.RespectRowAbilities = new HashSet<int>(Ints(rr));
+                if (spirit.TryGetProperty("boss_fractional", out var bf))
+                    foreach (var kv in bf.EnumerateObject()) d.BossFractional[int.Parse(kv.Name)] = kv.Value.GetInt32();
                 if (spirit.TryGetProperty("special_evade_abilities", out var se))
                     foreach (var id in Ints(se)) d.SpiritEvadeAbilities.Add(id);
                 foreach (var kv in spirit.GetProperty("special_multipliers").EnumerateObject())
                     d.SpecialMultipliers[int.Parse(kv.Name)] = kv.Value.GetDouble();
             }
+            if (root.TryGetProperty("die_at_zero_mp", out var mp0))
+                d.DieAtZeroMp = new HashSet<int>(Ints(mp0));
             if (root.TryGetProperty("hard_items", out var hard))
                 foreach (var h in hard.EnumerateArray())
                     d.HardItems.Add(new HardList
                     {
                         Type = Str(h, "type"), Member = Str(h, "member"), Kind = Str(h, "kind"),
                         Vanilla = Items(h.GetProperty("vanilla")), Bnw = Items(h.GetProperty("bnw")),
+                        Key = h.TryGetProperty("key", out var key) ? key.GetInt32() : (int?)null,
                     });
             if (root.TryGetProperty("passives", out var passives))
                 foreach (var kv in passives.EnumerateObject())
@@ -263,6 +281,10 @@ namespace BraveNewWorld.Rules
                 d.UmaroColumns = Ints(umaro.GetProperty("columns"));
                 d.UmaroRows = umaro.GetProperty("rows").EnumerateArray().Select(Ints).ToArray();
             }
+            if (root.TryGetProperty("coliseum", out var coliseum))
+                d.ColiseumRows = coliseum.EnumerateArray().Select(Ints).ToArray();
+            if (root.TryGetProperty("no_suplex", out var noSuplex))
+                d.NoSuplex = Ints(noSuplex);
             if (root.TryGetProperty("command_weapons", out var cw))
                 foreach (var kv in cw.EnumerateObject())
                     d.CommandWeapons[kv.Name] = (Ints(kv.Value.GetProperty("vanilla")), Ints(kv.Value.GetProperty("bnw")));
