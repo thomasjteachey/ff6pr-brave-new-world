@@ -32,7 +32,11 @@ class BraveNewWorld(Profile):
     # BNW's Phoenix Tear (SNES 249) took vanilla Magicite's slot (PR item 18, Magicite Shard: a random esper,
     # function 46): it revives like Phoenix Down (its targets, effect, sound and function group 2), at 3/4 of
     # max HP (BnwPlugin ReviveRules)
+    # Windbreaker, Doomstick and Quartrstaff (weapons 58-60) can't be used as items in BNW (item byte 0 bit 5
+    # clear): no item-use cast (the PR's 280-282 never break, so they were endless free casts)
     table_overrides = {"product": {562: {"coefficient": 1000}},
+                       "weapon": {58: {"trigger_ability_id": 0}, 59: {"trigger_ability_id": 0},
+                                  60: {"trigger_ability_id": 0}},
                        "item": {18: {"system_id": 1, "renge_id": 7, "menu_renge_id": 7, "battle_renge_id": 7,
                                      "battle_effect_asset_id": 343, "menu_se_asset_id": 593,
                                      "menu_function_group_id": 2, "battle_function_group_id": 2}}}
@@ -76,6 +80,12 @@ class BraveNewWorld(Profile):
     # group 11 = vanilla's group 1 + flag 5); its damage and cost are the plugin's (BattleFormulas)
     ability_overrides = {201: {"standard_value": 255}, 200: {"standard_value": 382},
                          19: {"content_flag_group_id": 11},
+                         # Fire/Ice/Thunder Rod used as items (PR 277-279): BNW casts Fire 2/Ice 2/Bolt 2 at their power
+                         # (54/60/66) with defense applied (c2.asm:1190-1194 DEC $3414; vanilla skipped it): content flag
+                         # group 4 = {1, 3}, vanilla's group 14 without flag 5 (ignore defense); still unreflectable
+                         277: {"standard_value": 54, "content_flag_group_id": 4},
+                         278: {"standard_value": 60, "content_flag_group_id": 4},
+                         279: {"standard_value": 66, "content_flag_group_id": 4},
                          137: {"process_prog": "None"},   # Chakra: a plain recovery (ChakraGpRules), not Mantra's CHAKRA
                          # Bushido slots BNW reordered (function_overrides above): Mindblow an MP hit, Empowerer the
                          # drain program, Dragon none

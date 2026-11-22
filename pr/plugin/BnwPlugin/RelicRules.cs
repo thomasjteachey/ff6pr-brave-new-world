@@ -54,6 +54,7 @@ namespace BraveNewWorld.PR
         {
             Hooks.Patch(h, typeof(ActUtility), "GetBlackBeltCounterAct", typeof(RelicRules), prefix: nameof(Counter_Prefix));
             Hooks.Patch(h, typeof(Serial.FF6.Management.SerialBattleUtility), "CanContiniusJumpAttack", typeof(RelicRules), postfix: nameof(Jump_Postfix));
+            Hooks.Patch(h, typeof(JumpEffectActFunction), "SetAddtiionAbility", typeof(RelicRules), prefix: nameof(JumpHand_Prefix));
             var calc = typeof(CalcExecuteCorrection);
             Hooks.Patch(h, calc, "IsUseMpCriticalOccurrence", typeof(RelicRules), postfix: nameof(MpCrit_Postfix));
             Hooks.Patch(h, calc, "GetAccessoryPhysicalCorrectionValue", typeof(RelicRules), postfix: nameof(Physical_Postfix));
@@ -315,6 +316,25 @@ namespace BraveNewWorld.PR
 
         // The game keys Dragon Horn on an item id (a constant) that BNW gave to another item,
         // so the check is redone on BNW's Dragon Horn items (Dragon Helm).
+        // BNW (c2.asm:1145, C2/1805 CLC): a dual-wielder's Jump always strikes with the right hand. The PR picks a
+        // random hand when the act has no arm set (JumpEffectActFunction.SetAddtiionAbility: GetRandPlus(1)).
+        internal static int JumpRightHand;
+        public static void JumpHand_Prefix(JumpEffectActFunction __instance)
+        {
+            if (!Enabled || __instance == null) return;
+            try
+            {
+                var act = __instance.BattleActData;
+                if (act == null || act.UseArmType != BattleActData.ArmType.Non) return;
+                var owned = act.AttackUnitData?.TryCast<BattlePlayerData>()?.ownedCharacterData;
+                if (owned == null || !DualWielding(owned)) return;
+                act.UseArmType = BattleActData.ArmType.Right;
+                JumpRightHand++;
+                Hooks.NoteOnce("jump-right", () => $"[relics] dual-wield Jump: right hand only ({owned.Name})");
+            }
+            catch (Exception e) { Hooks.WarnOnce("RelicRules.JumpHand", e); }
+        }
+
         public static void Jump_Postfix(BattleUnitData battleUnitData, ref bool __result)
         {
             if (!Enabled || battleUnitData == null) return;
@@ -417,6 +437,14 @@ namespace BraveNewWorld.PR
                 if (list == IntPtr.Zero || equipIds.Pointer != list) return;
                 if (FormulaProbe.Active) { __result = 0; return; }  // probe: no relic boosts
                 int was = __result;
+                // BNW (c2.asm:1835-1842): the Item command gets no Earring/esper boost (rods used as items)
+                var act = BattlePlugManager.Instance()?.BattleActExection?.InStagingBattleActData;
+                if (act != null && (act.IsUsedItem || (act.itemList?.Count ?? 0) > 0))
+                {
+                    __result = 0;
+                    Hooks.NoteOnce("magic-count-item", () => $"[relics] magic boost: none for an item's cast (was {was}, {ownedCharacterData.Name})");
+                    return;
+                }
                 if (__result > 1) __result = 1;
                 if (__result == 0)
                 {

@@ -88,11 +88,14 @@ namespace BraveNewWorld.PR
             P(Hooks.Patch(h, typeof(BattleConditionController), "InterruptAddCondition", typeof(AuditRules), prefix: nameof(AddById_Prefix),
                           args: new[] { typeof(BattleUnitData), typeof(int) }));
             P(Hooks.Patch(h, typeof(TranceConditionFunction), "Start", typeof(AuditRules), postfix: nameof(Trance_Postfix)));
+            P(Hooks.Patch(h, typeof(BattleUtility), "CheckHaveCondition", typeof(AuditRules), prefix: nameof(PetrifyHeal_Prefix),
+                          args: new[] { typeof(Il2CppSystem.Collections.Generic.List<Condition>), typeof(ConditionType) }));
             // 4
             P(Hooks.Patch(h, typeof(CounterModule), "IsCounter", typeof(AuditRules), postfix: nameof(Counter_Postfix),
                           args: new[] { typeof(BattleUnitData), typeof(BattleActData), typeof(FunctionGroupInfo) }));
             // 5
             P(Hooks.Patch(h, typeof(CalcControllerProvider), "GetFightStatus", typeof(AuditRules), postfix: nameof(Row_Postfix)));
+            P(Hooks.Patch(h, typeof(CalcControllerProvider), "GetFightStatus", typeof(AuditRules), postfix: nameof(XFightCrit_Postfix)));
             // 6 (and 3's deferred Imp removal)
             P(Hooks.Patch(h, typeof(BattleProgressATBFF6), "Update", typeof(AuditRules), postfix: nameof(Frame_Postfix)));
             Plugin.L.LogInfo($"[audit] {n} of {of} hooks: Stamina-only evasion {D?.StaminaFirstAbilities.Count} abilities, fractional on bosses " +
@@ -246,8 +249,53 @@ namespace BraveNewWorld.PR
             Hooks.NoteOnce("audit-imp-morph", () => "[audit] Imp misses a Morphed character");
         }
 
+        // Overcast (PR 357: condition 82, DoomZonbie type 671) ends in InterruptAddCondition(unit, Zombie) with no
+        // resistance check. BNW (c2.asm:3514-3534 OvercastFix): a zombie-immune target gets the Death instead
+        // (and nothing when it's also KO-immune; condition 82 itself is blocked by KO immunity)
+        const int DoomZombieType = 671, ZombieConditionId = 15;
+        internal static int OvercastDeaths;
+
+        static bool OvercastZombie(BattleUnitData u)
+        {
+            var p = u?.BattleUnitDataInfo?.Parameter;
+            if (p == null || !Has(p, DoomZombieType)) return true;
+            var m = p.ConfirmedResistanceCondtionList();
+            if (m == null || !m.ContainsKey(ZombieConditionId) || m[ZombieConditionId] != 1) return true;
+            OvercastDeaths++;
+            Hooks.NoteOnce("audit-overcast", () => $"[audit] Overcast on a zombie-immune unit: KO instead of Zombie (BNW){(EngineRules.DeathImmune(u) ? " - KO-immune too: nothing" : "")}");
+            if (!EngineRules.DeathImmune(u))
+                BattlePlugManager.Instance()?.BattleConditionController?.InterruptAddCondition(u, ConditionType.UnableFight);
+            return false;
+        }
+
+        // BNW (c2.asm:547-549 PetrifyHelp): a heal that also lifts Petrify works on a petrified target. The PR's
+        // CalcControllerProvider.ExchangeValueForCondition turns any value on a Mineralization target into a miss
+        // (CheckHaveCondition(list, 11)); while one of these abilities is staged, that check answers "not petrified".
+        static readonly HashSet<int> PetrifyLiftingHeals = new() { 37, 108, 193, 302, 7725 };
+        internal static int PetrifyHeals;
+        public static bool PetrifyHeal_Prefix(ConditionType __1, ref bool __result)
+        {
+            if (__1 != ConditionType.Mineralization || !Damage) return true;
+            try
+            {
+                var ab = FirstAbility(BattlePlugManager.Instance()?.BattleActExection?.InStagingBattleActData);
+                if (ab == null || !PetrifyLiftingHeals.Contains(ab.Id)) return true;
+                PetrifyHeals++;
+                int id = ab.Id;
+                Hooks.NoteOnce("audit-petrify-heal", () => $"[audit] ability {id} heals a petrified target (BNW)");
+                __result = false;
+                return false;
+            }
+            catch (Exception e) { Hooks.WarnOnce("AuditRules.PetrifyHeal", e); return true; }
+        }
+
         public static bool AddByType_Prefix(BattleUnitData __0, ConditionType __1)
         {
+            if (Damage && __1 == ConditionType.Zombie)
+            {
+                try { return OvercastZombie(__0); }
+                catch (Exception e) { Hooks.WarnOnce("AuditRules.Overcast", e); return true; }
+            }
             if (!Damage || (int)__1 != KappaType || !Morphed(__0?.BattleUnitDataInfo?.Parameter)) return true;
             ImpRefusals++;
             return false;
@@ -302,6 +350,28 @@ namespace BraveNewWorld.PR
         }
 
         // --- 5. the back row -----------------------------------------------------------------------------------
+
+        // X-Fight (an Offering weapon, BNW c2.asm:1883-1930): BNW keeps the normal 1-in-32 critical. The PR skips its
+        // critical code whenever the Offering correction applies (PhysicalExecution :987/:1454), so the roll is redone here.
+        const int FightType = 4;
+        internal static int XFightCrits;
+        public static void XFightCrit_Postfix(CalcControllerProvider __instance, ICalcResult __result)
+        {
+            if (!Damage || __instance == null || __result == null) return;
+            try
+            {
+                var ab = __instance.ability;
+                var user = __instance.userCharaData;
+                if (ab == null || ab.TypeId != FightType || __instance.item != null || user == null) return;
+                if (__result.GetHitType() != HitType.Hit || !RelicRules.HasOffering(user)) return;
+                if (Rng.Next(32) != 0) return;
+                int was = __result.GetValue(false);
+                __result.SetStatus(Math.Min(9999, was * 2), HitType.Critical, __result.GetHitCount(), __result.GetConditions(), false);
+                XFightCrits++;
+                Hooks.NoteOnce("audit-xfight-crit", () => $"[audit] X-Fight critical: {was} -> {Math.Min(9999, was * 2)} ({user.Name})");
+            }
+            catch (Exception e) { Hooks.WarnOnce("AuditRules.XFightCrit", e); }
+        }
 
         public static void Row_Postfix(CalcControllerProvider __instance, ICalcResult __result)
         {

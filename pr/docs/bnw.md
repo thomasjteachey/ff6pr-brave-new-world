@@ -4,6 +4,18 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
 
 ## Live progress (newest first)
 
+- 2026-11-22 (BNW 0.25.0 session): **v0.25.1 released on GitHub (Latest) and on the Nexus draft (mod 167, private).**
+  https://github.com/thomasjteachey/ff6pr-brave-new-world/releases/tag/v0.25.1
+  - Audit gaps (unclear rows): rods as items at BNW power with defense (profile_bnw ability_overrides 277-279, content
+    flag group 4) and no item casts on weapons 58-60; no Earring/esper boost on item casts; Overcast on zombie-immune
+    -> KO; petrify-lifting heals on petrified targets (CheckHaveCondition prefix); X-Fight 1/32 crits; dual-wield Jump
+    right hand only. Not built: Hotswap delay, X-Fight procs/strike-2 retarget, Giant's dying attack by poison (kit,
+    frozen), the OPEN research rows. Notes: side-session-notes bnw-v026-progress.md.
+  - bnw-final's unconfirmed checks: ai-440 + endfight-rewards PASS (test fixes: aikeep on, "formation -1"); Whelk
+    PASS split; ai-bosses-2#b battles all end, its pass list names monsters outside its battles (test definition).
+  - Checks: 7 Debug builds, Rules.Tests 40/40, PrKit.Tests 19/19, test_mod 51 OK, QA bnw-gaps smoke (laptop): [audit] 13
+    of 13 hooks, [items] 10 of 10, no exceptions. Behaviour of the new rules not yet hand-checked in game.
+  - BraveNewWorld-PR.zip SHA-256 6fc63468...f233; its DLL matches the PC install. Kit pin 6a1024c.
 - 2026-11-21 23:00 (BNW 0.25.0 session): **v0.25.0 released on GitHub (Latest) and uploaded to the Nexus draft (mod 167,
   still private).** https://github.com/thomasjteachey/ff6pr-brave-new-world/releases/tag/v0.25.0
   - Landed bnw-v025-items (tools/worktree.py land): Throw stars spread + split, Golem, Palidor's Jump, MP-crit procs,
