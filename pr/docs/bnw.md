@@ -4,6 +4,14 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
 
 ## Live progress (newest first)
 
+- 2026-11-22 (BNW 0.25.0 session): **v0.26.0 released on GitHub (Latest) and on the Nexus draft (mod 167, private).**
+  https://github.com/thomasjteachey/ff6pr-brave-new-world/releases/tag/v0.26.0
+  - X-Fight keeps the weapon's procs: RelicRules.XFightProc_Prefix/Postfix on FightActFunctionToAddAbility.SetAddtiionAbility
+    (IsDisorderlyShootAttack answers false inside it; the PR returned there before adding the weapon ability).
+  - Stopped at 94% weekly: Hotswap delay, X-Fight strike-2 retarget, Giant's dying attack by poison/sap (now plugin-side
+    possible or kit, freeze over) and the OPEN research rows are left (bnw-v026-progress.md).
+  - Checks: BNW + WC Debug builds, Rules.Tests 40/40, test_mod OK, QA bnw-xfight smoke (laptop): 13/13 audit + 10/10 item
+    hooks, no [patch]/exception. Zip SHA-256 d11b1eda...a6d8, DLL matches the PC install. Kit pin 6a1024c.
 - 2026-11-22 (BNW 0.25.0 session): **v0.25.1 released on GitHub (Latest) and on the Nexus draft (mod 167, private).**
   https://github.com/thomasjteachey/ff6pr-brave-new-world/releases/tag/v0.25.1
   - Audit gaps (unclear rows): rods as items at BNW power with defense (profile_bnw ability_overrides 277-279, content

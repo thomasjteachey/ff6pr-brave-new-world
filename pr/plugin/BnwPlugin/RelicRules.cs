@@ -55,6 +55,7 @@ namespace BraveNewWorld.PR
             Hooks.Patch(h, typeof(ActUtility), "GetBlackBeltCounterAct", typeof(RelicRules), prefix: nameof(Counter_Prefix));
             Hooks.Patch(h, typeof(Serial.FF6.Management.SerialBattleUtility), "CanContiniusJumpAttack", typeof(RelicRules), postfix: nameof(Jump_Postfix));
             Hooks.Patch(h, typeof(JumpEffectActFunction), "SetAddtiionAbility", typeof(RelicRules), prefix: nameof(JumpHand_Prefix));
+            Hooks.Patch(h, typeof(FightActFunctionToAddAbility), "SetAddtiionAbility", typeof(RelicRules), prefix: nameof(XFightProc_Prefix), postfix: nameof(XFightProc_Postfix));
             var calc = typeof(CalcExecuteCorrection);
             Hooks.Patch(h, calc, "IsUseMpCriticalOccurrence", typeof(RelicRules), postfix: nameof(MpCrit_Postfix));
             Hooks.Patch(h, calc, "GetAccessoryPhysicalCorrectionValue", typeof(RelicRules), postfix: nameof(Physical_Postfix));
@@ -193,8 +194,17 @@ namespace BraveNewWorld.PR
         }
 
         // BNW's Offering weapons make the attack an Offering ("disorderly shoot") attack
+        // X-Fight keeps the weapon's procs in BNW (c2.asm LoadWeaponProperties drops vanilla's Offering block, $3A89=0).
+        // The PR's FightActFunctionToAddAbility.SetAddtiionAbility returns before adding the weapon ability when
+        // IsDisorderlyShootAttack(unit): while it runs, that check answers false.
+        [ThreadStatic] static bool inXFightProc;
+        internal static int XFightProcs;
+        public static void XFightProc_Prefix() { inXFightProc = true; }
+        public static void XFightProc_Postfix() { inXFightProc = false; }
+
         public static void OfferingUnit_Postfix(BattleUnitData battleUnitData, ref bool __result)
         {
+            if (inXFightProc && Enabled) { if (__result) XFightProcs++; __result = false; return; }   // X-Fight keeps its weapon procs (BNW)
             if (__result || !Enabled || FormulaProbe.Active) return;
             try { if (HasAbility(Owner(battleUnitData), OfferingAbility)) __result = true; }
             catch (Exception e) { Hooks.WarnOnce("RelicRules.Offering", e); }
