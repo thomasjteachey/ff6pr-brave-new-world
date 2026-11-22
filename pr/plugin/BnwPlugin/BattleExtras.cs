@@ -55,6 +55,7 @@ namespace BraveNewWorld.PR
                 "As in BNW 3.0: battles on the Veldt give no EXP and no EP (SP still banks) and twice the gil.");
 
             Hooks.Patch(h, typeof(ItemFilters), "GetEquipItems", typeof(BattleExtras), postfix: nameof(EquipItems_Postfix));
+            Hooks.Patch(h, typeof(OwnedCharacterData), "get_HasTwoSwordStyle", typeof(BattleExtras), postfix: nameof(TwoSword_Postfix));
             var gen = AccessTools.Method(typeof(BattleResultProvider), "Genelate");
             // after BattleRewards' prefix (it raises EXP to the defeated monsters' total)
             Hooks.Patch(h, gen, typeof(BattleExtras), prefix: nameof(Result_Prefix), postfix: nameof(Result_Postfix),
@@ -130,6 +131,28 @@ namespace BraveNewWorld.PR
                 }
             }
             return $"{spear} spears, {dual} dual-wield weapons, {both} with both (BNW 3.0: 7, 28, 8)";
+        }
+
+        // The game's own "may this character hold a second weapon" (OwnedCharacterData.HasTwoSwordStyle: an owned
+        // ability of type 12) never sees a weapon's equip ability: the game puts no weapon ability in the character's
+        // lists (probe bnwdual, laptop 2026-11-22: a Dirk or Boomerang in hand, EquipmentAbilitys [0 0 0], no type-12
+        // ability, before and after UpdateEquipParameter). OwnedCharacterClient.SetEquip then empties the other hand
+        // whenever a second weapon goes in (decompiled SetEquip#b1da50: neither two-handed nor a bow, and no
+        // TwoSwordStyle), so a second Boomerang took the first one off (the user's Deck). BNW: dual wield is a weapon
+        // property, so a dual-wield weapon (ability 252) in either hand answers yes; the pairing rule above still
+        // decides which weapons the menus offer beside it.
+        public static void TwoSword_Postfix(OwnedCharacterData __instance, ref bool __result)
+        {
+            if (__result || !RelicRules.Enabled || FormulaProbe.Active || __instance == null) return;
+            try
+            {
+                foreach (var slot in new[] { EquipSlotType.Slot1, EquipSlotType.Slot2 })
+                {
+                    var g = GripOf(HeldWeapon(__instance, slot));
+                    if (g == WeaponGrip.DualWield || g == WeaponGrip.Both) { __result = true; return; }
+                }
+            }
+            catch (Exception e) { Hooks.WarnOnce("BattleExtras.TwoSword", e); }
         }
 
         public static void EquipItems_Postfix(EquipSlotType slot, OwnedCharacterData target, ref ItemSeq __result)

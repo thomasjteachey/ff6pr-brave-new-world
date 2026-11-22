@@ -11,6 +11,8 @@ namespace BraveNewWorld.PR
     {
         public static void Register()
         {
+            Harness.Register("bnwdual", Dual, "bnwdual <party index 0-3> <PR weapon A> <PR weapon B>: equip A in hand 1, then B in " +
+                "hand 2 through the game's equip call, and print both hands and HasTwoSwordStyle (memory only)");
             Harness.Register("bnwgive", Give, "bnwgive <PR item id> [count]: add that item to the inventory (memory only)");
             Harness.Register("exp", Exp, "exp: each party member's level, EXP and the EXP table's total for the next level");
             Harness.Register("bnwhurt", a => Hurt(), "bnwhurt: every party member to 1 HP and 0 MP (memory only), for heal checks (QA recovery points)");
@@ -81,6 +83,60 @@ namespace BraveNewWorld.PR
 
         // the member's own data (UserDataManager's list, not GetOwnedCharactersClone's copies), so a battle started next
         // builds its parameters with the weapon
+        // the user's Deck, 2026-11-22: a second Boomerang in the other hand took the first one off. Equips weapon A
+        // then weapon B the way the equip menu does (OwnedCharacterClient.SetEquip by character id: the path whose
+        // SetEquip#b1da50 empties the other hand unless HasTwoSwordStyle), and reports both hands and the flag
+        static string Dual(string[] a)
+        {
+            if (a.Length < 3 || !int.TryParse(a[0], out int idx) || !int.TryParse(a[1], out int wa) || !int.TryParse(a[2], out int wb))
+                return "error: bnwdual <party index 0-3> <PR weapon A> <PR weapon B>";
+            var udm = UserDataManager.Instance();
+            var mm = MasterManager.Instance;
+            if (udm == null || mm == null) return "error: no save loaded";
+            var party = udm.GetPartyMemberData();
+            if (party == null || idx < 0 || idx >= party.Count || party[idx] == null) return $"error: no party member {idx}";
+            Last.Data.User.OwnedCharacterData member = null;
+            var all = udm._OwnedCharacterList_k__BackingField;
+            if (all != null) foreach (var o in all) if (o != null && o.Id == party[idx].Id) { member = o; break; }
+            if (member == null) return "error: member not in the owned list";
+            Last.Data.User.OwnedItemData Owned(int weapon)
+            {
+                int cid = -1;
+                foreach (var ct in mm.GetList<Content>().Values)
+                    if (ct != null && ct.TypeId == 2 && ct.TypeValue == weapon) { cid = ct.Id; break; }
+                if (cid < 0) return null;
+                new OwnedItemClient().AddOwnedItem(cid, 2);
+                return udm.SearchOwnedItem(cid);
+            }
+            string Hands()
+            {
+                var eq = member.EquipmentData;
+                int W(Last.Defaine.EquipSlotType s) => eq != null && eq.ContainsKey(s) && eq[s]?.Weapon != null ? eq[s].Weapon.Id : 0;
+                var eqa = member.EquipmentAbilitys;
+                var ids = new List<string>();
+                if (eqa != null) foreach (var x in eqa) ids.Add(x.ToString());
+                int t12 = 0, n = 0;
+                var own = member.OwnedAbilityList;
+                if (own != null) foreach (var o in own) { n++; if (o?.Ability != null && o.Ability.TypeId == 12) t12++; }
+                return $"hand1 {W(Last.Defaine.EquipSlotType.Slot1)} hand2 {W(Last.Defaine.EquipSlotType.Slot2)} dual {member.HasTwoSwordStyle} " +
+                       $"(equip abilities [{string.Join(" ", ids)}], owned abilities {n}, type 12: {t12})";
+            }
+            var ia = Owned(wa);
+            var ib = Owned(wb);
+            if (ia == null || ib == null) return $"error: no content for weapon {(ia == null ? wa : wb)}";
+            var client = new OwnedCharacterClient();
+            string start = Hands();
+            client.SetEquip(member.Id, Last.Defaine.EquipSlotType.Slot1, ia, false, false);
+            string first = Hands();
+            bool refresh = a.Length > 3 && a[3] == "refresh";
+            if (refresh) member.UpdateEquipParameter();
+            string firstR = refresh ? Hands() : "-";
+            client.SetEquip(member.Id, Last.Defaine.EquipSlotType.Slot2, ib, false, false);
+            string line = $"bnwdual {member.Name} {wa}+{wb}: start {start}; after A {first}; refreshed {firstR}; after B {Hands()}";
+            Plugin.L.LogInfo("[equip] " + line);
+            return line;
+        }
+
         static string Equip(string[] a)
         {
             if (a.Length < 2 || !int.TryParse(a[0], out int idx) || !int.TryParse(a[1], out int weapon))

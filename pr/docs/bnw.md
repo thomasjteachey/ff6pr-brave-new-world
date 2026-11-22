@@ -4,6 +4,14 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
 
 ## Live progress (newest first)
 
+- 2026-11-22 (BNW 0.25.0 session): **v0.26.1 released on GitHub (Latest) and on the Nexus draft (mod 167, private).**
+  https://github.com/thomasjteachey/ff6pr-brave-new-world/releases/tag/v0.26.1
+  - User-reported fixes (notes: boomerang-dual-wield.md): `<d7>` before boomerang names (ff6snes ICONS from 0xD7);
+    Harvester and 10 other heal spells missing on allies (port_spells adds the HP-recovery function); two of the same
+    Boomerang/dagger dual-wield (BattleExtras TwoSword_Postfix); Vargas's Gale Cut freeze (port_spells keeps the
+    template's renge when targeting is unchanged).
+  - Checks: 7 Debug builds, Rules.Tests 40/40, PrKit.Tests 19/19, test_mod 51 OK (test_wc 146 OK by the fixer).
+    Zip SHA-256 26342a29...e2b6, DLL matches the PC install. Kit pin 6a1024c.
 - 2026-11-22 (BNW 0.25.0 session): **v0.26.0 released on GitHub (Latest) and on the Nexus draft (mod 167, private).**
   https://github.com/thomasjteachey/ff6pr-brave-new-world/releases/tag/v0.26.0
   - X-Fight keeps the weapon's procs: RelicRules.XFightProc_Prefix/Postfix on FightActFunctionToAddAbility.SetAddtiionAbility
