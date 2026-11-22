@@ -144,6 +144,10 @@ class BraveNewWorld(Profile):
     bnw_boss_events = True
     bnw_dragon_visits = True    # after each dragon, its tally shown in Kaiser's room, that dragon's marker going (CB/5090)
     bnw_rewards = True         # BNW's changed event gifts in the PR's scripts (port_bnw_rewards)
+    bnw_party_events = True    # Shadow never leaves at random, Zozo unequips the bench + Shadow, Terra/Edgar optimized (port_bnw_party_events)
+    bnw_respec_npc = True      # Ultros's EL respec, 25,000 GP then 100,000 (port_bnw_menus; plugin MenuRules)
+    bnw_umaro_equip = True     # airship NPCs unequip Umaro too (port_bnw_menus; menu lock: plugin MenuRules)
+    bnw_hp_refills_mp = True   # every event HP refill restores MP (port_bnw_menus.port_late)
     bnw_save_points = True      # BNW's 11 new save points as the PR's SavePoint objects (port_bnw_mechanics)
     bnw_recovery_points = True  # BNW's 14 full-recovery save points: a step-on heal on each (port_bnw_mechanics)
     bnw_added_scenes = True     # BNW's added/extended scenes: Kefka's Tower's barrier, Leo's Crest, Shadow's full-party hire, South Figaro's wall (port_bnw_added_scenes)
@@ -232,6 +236,8 @@ class BraveNewWorld(Profile):
     # BNW spell procs from special effects: 3/6 = 50% Net beside the swing, B = Windslash
     # (25%) and E = Aero (50%) instead of the swing (c2.asm 2853, 3061, 2951)
     special_procs = {3: ("add", 0xAD, 50), 6: ("add", 0xAD, 50), 11: ("change", 0x98, 25), 14: ("change", 0x99, 50)}
+    # an MP-critical swing turns Doomstick's Doom into X-Zone (c4.asm SpellCastId): X-Zone (PR 58) needs a proc copy too
+    extra_proc_copies = (58,)
     # proc odds (bnw 3.0 item.asm RandomCast): 1 in 4; "Use Brush Odds" (byte 11 bit 2) 1 in 2;
     # "High Proc Rate" (byte 12 bit 7, weapon or relic) 1 in 2, or 3 in 4 with brush odds
     proc_odds = {"brush": (11, 2), "high": (12, 7), "brush_rate": 50, "high_rate": 50, "brush_high_rate": 75}
@@ -254,14 +260,14 @@ class BraveNewWorld(Profile):
         return bnw_text.sections(self.rom)
 
     def esper_descriptions(self):
-        import bnw_text
-        return bnw_text.esper_descriptions()
+        import port_bnw_descriptions
+        return port_bnw_descriptions.esper_descriptions()
 
     def rage_descriptions(self):
         # BNW's Rage menu shows each rage's two attacks (ragedance_descriptions.asm): its own
         # words for the 64 rages Gau can learn; port_dances.describe_rages names the rest's
-        import bnw_text
-        return bnw_text.rage_descriptions(self.rom)
+        import port_bnw_descriptions
+        return port_bnw_descriptions.rage_descriptions(self.rom)
 
     def extra_data(self, rom):
         import bnw_plugin_data
@@ -297,6 +303,9 @@ class BraveNewWorld(Profile):
         # BNW's changed scenes in the PR's map scripts (bnw-text-ui: the blacksmith's forge, lines BNW cut)
         import port_bnw_scenes
         port_bnw_scenes.port(self.out)
+        # last: every event "HP to max" also fills MP (C0/AED5; readme audit C, port_bnw_menus)
+        import port_bnw_menus
+        port_bnw_menus.port_late(self.out, print, self)
         return files
 
     def extra_messages(self, rom):

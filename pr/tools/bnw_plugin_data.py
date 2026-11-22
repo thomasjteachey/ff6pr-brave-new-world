@@ -12,6 +12,7 @@ import kitpath  # noqa: F401  (the modding kit's tools, when it's this repositor
 import bnw_text
 import ff6snes as S
 import idmap as M
+import port_bnw_descriptions
 import port_resist as R
 
 EP_CHART = 0x2D8BCA      # ED/8BCA: 25 words, total EP needed for EL 1..25
@@ -215,7 +216,7 @@ def esper_rules(bnw):
     for line in block.splitlines()[1:17]:
         bs = [int(x, 16) for x in re.findall(r"\$([0-9A-Fa-f]{2})", line.split(";")[0])]
         masks.append(bs)
-    sections = bnw_text.sections()
+    sections = bnw_text.sections(port_bnw_descriptions.BNW_ROM)
     names = S.spell_names(bnw)
     out = []
     for e, raw in enumerate(bnw.table(*S.ESPERS)):
@@ -266,9 +267,24 @@ def proc_rules(bnw):
     high = [content.get((k, pid), 0) for it, k, pid in _equipment(bnw)
             if k == "armor" and it.raw[odds["high"][0]] >> odds["high"][1] & 1]
     rates = port_procs.LAST.get("rates", {})
+    copies = port_procs.LAST.get("copies", {})   # PR spell -> its proc copy
+    spells = bnw.table(*S.SPELLS)
+    # an MP-critical swing's proc (c4.asm SpellCastId 630-642 / CastTarget 644-662 from C2/3659, C2/381B): Doom (PR
+    # 53) becomes X-Zone (58); Quartr (63) and X-Zone hit all enemies; a "never critical" spell (byte 7 bit 5: Holy,
+    # Flare, Quartr) keeps its normal damage (the PR doubles every MP-crit proc: BattleActData.IsCriticalMagic)
+    doom, xzone, quartr = copies.get(53), copies.get(58), copies.get(63)
+    mp_crit = {"swap": {str(doom): xzone} if doom and xzone else {},
+               "all_enemies": sorted(c for c in (quartr, xzone) if c),
+               "no_crit": sorted(c for i, d in enumerate(spells) if d[7] & 0x20 and M.spell(i) is not None
+                                 for c in [copies.get(M.spell(i))] if c)}
     return {"base_rate": 25, "high_rate": odds["high_rate"],
             "weapons": [{"weapon_id": w, "rate": r[0], "high_rate": r[1]} for w, r in sorted(rates.items())],
-            "high_rate_content_ids": sorted(c for c in high if c)}
+            "high_rate_content_ids": sorted(c for c in high if c),
+            "mp_crit": mp_crit,
+            # thrown weapons BNW lets target a group (item byte 14 bit 5: its stars, targeting $61; knives $41), as PR content ids
+            "throw_spread_contents": sorted(c for it, k, pid in _equipment(bnw)
+                                            if k == "weapon" and it.raw[0] & 0x10 and it.raw[14] & 0x20
+                                            for c in [_content_ids().get((k, pid), 0)] if c)}
 
 
 # --- command wait times (the Wait Gauge's "cast bar") --------------------------------

@@ -70,6 +70,11 @@ namespace BraveNewWorld.Rules
         public int[] HighRateContentIds = Array.Empty<int>();     // relics with "High Proc Rate"
         // per weapon: its chance, and its chance when a relic adds High Proc Rate
         public Dictionary<int, (int Rate, int High)> Weapons = new Dictionary<int, (int, int)>();
+        // an MP-critical swing's proc (c4.asm SpellCastId / CastTarget): Doom's copy -> X-Zone's; copies hitting all
+        // enemies; copies of "never critical" spells (their damage isn't doubled)
+        public Dictionary<int, int> CritSwap = new Dictionary<int, int>();
+        public HashSet<int> CritAllEnemies = new HashSet<int>(), NoCrit = new HashSet<int>();
+        public HashSet<int> ThrowSpread = new HashSet<int>();   // PR content ids of weapons a Throw may spread over a group (stars)
 
         public int RateFor(int weaponId, bool highRelic) =>
             Weapons.TryGetValue(weaponId, out var r) ? (highRelic ? r.High : r.Rate) : -1;
@@ -220,6 +225,14 @@ namespace BraveNewWorld.Rules
                 };
                 foreach (var w in procs.GetProperty("weapons").EnumerateArray())
                     d.Procs.Weapons[w.GetProperty("weapon_id").GetInt32()] = (w.GetProperty("rate").GetInt32(), w.GetProperty("high_rate").GetInt32());
+                if (procs.TryGetProperty("mp_crit", out var mc))
+                {
+                    foreach (var kv in mc.GetProperty("swap").EnumerateObject()) d.Procs.CritSwap[int.Parse(kv.Name)] = kv.Value.GetInt32();
+                    d.Procs.CritAllEnemies = new HashSet<int>(Ints(mc.GetProperty("all_enemies")));
+                    d.Procs.NoCrit = new HashSet<int>(Ints(mc.GetProperty("no_crit")));
+                }
+                if (procs.TryGetProperty("throw_spread_contents", out var ts))
+                    d.Procs.ThrowSpread = new HashSet<int>(Ints(ts));
             }
             if (root.TryGetProperty("command_waits", out var waits))
             {

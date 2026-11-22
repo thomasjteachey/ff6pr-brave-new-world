@@ -69,6 +69,13 @@ def mod_tables():
 
 
 class Format(unittest.TestCase):
+    def test_party_events(self):
+        """port_bnw_party_events: no Shadow lottery in the 4 battle scripts; Zozo/Terra calls before their ChangeMap."""
+        if MOD_NAME != "BraveNewWorld":
+            self.skipTest("BNW's party events")
+        import port_bnw_party_events as PE
+        self.assertEqual(PE.check(MOD), [])
+
     def test_mod_exists(self):
         self.assertTrue(os.path.isdir(MOD_MASTER), "run tools/port_bnw.py first")
 

@@ -482,6 +482,9 @@ def port(out_dir, tables, log, profile, bnw=None):
     if getattr(profile, "bnw_rewards", False):
         import port_bnw_rewards   # BNW's changed event gifts (the event audit's mechanics)
         port_bnw_rewards.port(out_dir, log, profile)
+    if getattr(profile, "bnw_party_events", False):
+        import port_bnw_party_events   # readme audit C: Shadow's lottery, Zozo unequip, Terra/Edgar optimize
+        port_bnw_party_events.port(out_dir, log, profile)
     import port_bnw_mechanics   # save points, Bob, leavers... (the event audit's mechanics)
     for name, ids in port_bnw_mechanics.port(out_dir, log, profile, tables).items():
         changed.update(ids) if name == "script" else None
@@ -492,6 +495,9 @@ def port(out_dir, tables, log, profile, bnw=None):
         if getattr(profile, flag, False):
             r = __import__(mod).port(out_dir, log, tables)
             changed.update((r or {}).get("script", ()) if isinstance(r, dict) else (r or ()))
+    import port_bnw_menus   # readme audit C: Ultros's EL respec NPC, the airship NPCs unequipping Umaro
+    for name, ids in port_bnw_menus.port(out_dir, log, profile, tables).items():
+        changed.update(ids) if name == "script" else None
     for group, kv in keys.items():
         kdir = os.path.join(out_dir, group, "keys")
         os.makedirs(kdir, exist_ok=True)

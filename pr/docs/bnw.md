@@ -4,6 +4,27 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
 
 ## Live progress (newest first)
 
+- 2026-11-21 23:00 (BNW 0.25.0 session): **v0.25.0 released on GitHub (Latest) and uploaded to the Nexus draft (mod 167,
+  still private).** https://github.com/thomasjteachey/ff6pr-brave-new-world/releases/tag/v0.25.0
+  - Landed bnw-v025-items (tools/worktree.py land): Throw stars spread + split, Golem, Palidor's Jump, MP-crit procs,
+    audit batch C (Shadow's leave, Zozo unequip, Terra/Edgar optimize, Ultros EL respec, spear dual-wield ban, Umaro's
+    equip menu, event refills fill MP, NoGainz + Veldt), BattleUi on the kit's SnesInformativeMiss, port_bnw_descriptions.
+  - Relic fix: RelicRules.MagicCount_Postfix on CalcExecuteCorrection.GetEquipAccessoryNum (the magic list only):
+    count capped at 1, the esper's +25% when 0. The old GetAccessoryMagicCorrectionValue hook never ran (inlined).
+    Still open: item casts (rods/Windbreaker) get the boost and vanilla power.
+  - Checks: 7 Debug builds, Rules.Tests 40/40, PrKit.Tests 19/19, re-port, test_mod 51 OK; QA bnw-v025-c (PC 22:45):
+    umaroequip ok (first try at load misses the vtable entry, the retry unlocks it), [items] 10 of 10 hooks,
+    bnwrespec, bnwgear, no fail lines. Kit pin 6a1024c (kit frozen for WC 0.6.10).
+  - BraveNewWorld-PR.zip: 923 files, SHA-256 2e884b2f...5665; its DLL matches the PC install.
+- 2026-11-21 19:47 (BNW lead): **v0.24.0 released on GitHub (Latest).** The user chose "ship now" with bnw-final's
+  failures as known issues. https://github.com/thomasjteachey/ff6pr-brave-new-world/releases/tag/v0.24.0
+  - Repo commit b6ae655, tag v0.24.0, kit 6a1024c.
+  - BraveNewWorld-PR.zip: 841 files, 1,422,059 bytes, SHA-256 0fb6a574...f903. Its DLL matches the PC install; the
+    download's hash checks out.
+  - Known issues in the notes: revive amounts, GP Rain cost, First Strike and the statue's parts are untested; battle-end
+    and boss-AI runs unconfirmed; relic Magic and rod/Windbreaker casts for 0.24.1.
+  - Not done: the Nexus page (none exists yet; must stay private) and the Steam Deck push (`deploy.sh --bnw --deck`).
+    Installing BNW on the PC set WC aside (modswitch restores it).
 - 2026-11-21 06:57 (BNW lead): **PAUSED (the user: "pause everything"). Resume note:**
   - **State:** the tree is consistent. All seven plugins build in Debug; Rules.Tests 36/36, PrKit.Tests 19/19, test_mod
     50/50. Nothing of mine is running, and nothing is committed or published. The ATB child (local_57cc0ffb) has been

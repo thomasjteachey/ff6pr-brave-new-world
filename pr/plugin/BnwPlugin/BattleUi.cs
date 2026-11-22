@@ -14,55 +14,37 @@ using Last.Systems;
 using UnityEngine;
 using Harness = PrKit.Harness;
 using Hooks = PrKit.Hooks;
+using MissKind = PrKit.Ff6.SnesInformativeMiss.Kind;
+using SnesInformativeMiss = PrKit.Ff6.SnesInformativeMiss;
+using SnesInformativeMissMod = PrKit.Ff6.SnesInformativeMissMod;
 
 namespace BraveNewWorld.PR
 {
-    // BNW's informative misses (c2.asm "Informative Miss", Bropedio's inform-miss-3.asm): a status
-    // attack that changes nothing shows
+    // BNW's informative misses (c2.asm "Informative Miss", Bropedio's inform-miss-3.asm) are the kit's
+    // SnesInformativeMiss (PrKit/Ff6; the code that was here, moved there 2026-11-21): a status attack
+    // that changes nothing shows
     //   "Null"  when the target is immune to every status it would set (BNW's MaybeNull; the
     //           instant-death and fractional immunities are statuses the PR's monsters resist too),
     //   "Fail"  when the target was open to a status but evaded it (BNW's Stamina evasion, which
-    //           CommandRules' Spirit evasion makes a forced miss: StamEvdChk / StatusHelp),
+    //           CommandRules' Spirit evasion makes a forced miss: StamEvdChk / StatusHelp; the kit's
+    //           default counts every forced miss but the PR's own special refusals, Imp / Control /
+    //           WeakMaker),
     //   "Miss"  otherwise (hit roll, status already there, the PR's own special refusals).
-    // The PR decides a status per target in AddConditionFunction.Calc / AddConditionMultiFunction
-    // .Calc (decompiled tools/decomp/bnw_ui): IsAddable, then the serial provider's
-    // CheckForceMissCondition (forced miss), then the target's resistance list (1 = resists); a
-    // miss of all of them makes the function's result HitType.Miss. Here each such miss is sorted
-    // as BNW does (Fail before Null before Miss) and kept per target; when the game makes that
-    // target's miss popup (BattleUtility.CreateDamageView(unit, .., isMiss) -> ViewDamageEntity
-    // .ViewMiss, which sets the "miss_sprite" image and scales it to the sprite's size in pixels),
-    // the image gets a "FAIL" or "NULL" drawn in the Miss sprite's own style: 7-pixel white
-    // letters (240,240,240), a 1-pixel dark outline (24,24,40), 1 pixel between letters. English
-    // only (BNW's words; the other languages keep their own Miss).
+    // The kit sorts each status miss in the game's status calc (Fail before Null before Miss, per
+    // target) and draws FAIL / NULL into that target's miss popup in the Miss sprite's style; English
+    // only. Here: BNW's Config gate ([Battle] InformativeMiss), BNW's self-tests of it (bnwui miss /
+    // show / popup) and BNW's other battle UI tests (the Rage list, ATB colours, turns).
     static class BattleUi
     {
         internal static bool Enabled = true;
-        internal enum Kind { Miss, Null, Fail }   // BNW's order: Fail wins over Null, Null over Miss
-        const int English = 2;
-        static readonly HashSet<int> PrSpecialRefusals = new HashSet<int> { 601, 515, 605 };   // Imp, Control, WeakMaker
-        const float KeepSeconds = 30f;   // a classification waits this long for its popup (summons animate long)
-
-        // per target parameter: the act's sort of its status misses (Hit: a status function hit it)
-        static readonly Dictionary<IntPtr, (Kind Kind, bool Hit, float At, int Frame)> kinds = new Dictionary<IntPtr, (Kind, bool, float, int)>();
-        static IntPtr calcTarget;
-        static bool calcActive, calcFail, calcNull;
-        static Kind? pending;   // the kind for the miss popup being made
-        internal static int Shown;   // FAIL/NULL popups drawn (tests)
 
         public static void Apply(Harmony h, ConfigFile config)
         {
             Enabled = config.Bind("Battle", "InformativeMiss", true,
                 "BNW's informative misses: a status attack shows Null on an immune target and Fail when the status was evaded (English).").Value;
-            Hooks.Patch(h, typeof(AddConditionFunction), "Calc", typeof(BattleUi), prefix: nameof(Calc_Prefix), postfix: nameof(Calc_Postfix));
-            Hooks.Patch(h, typeof(AddConditionMultiFunction), "Calc", typeof(BattleUi), prefix: nameof(Calc_Prefix), postfix: nameof(Calc_Postfix));
-            // after CommandRules' postfix on the same method (Plugin.cs applies CommandRules first)
-            Hooks.Patch(h, typeof(Serial.FF6.Battle.AddConditionFunctionSerial), "CheckForceMissCondition", typeof(BattleUi),
-                postfix: nameof(ForceMiss_Postfix));
-            Hooks.Patch(h, typeof(BattleUtility), "CreateDamageView", typeof(BattleUi), prefix: nameof(View_Prefix), postfix: nameof(View_Postfix),
-                args: new[] { typeof(BattleUnitData), typeof(int), typeof(bool), typeof(bool) });
-            Hooks.Patch(h, typeof(ViewDamageEntity), "ViewMiss", typeof(BattleUi), postfix: nameof(ViewMiss_Postfix));
-            // a new act: the last one's sorts go (its popups are made during its own animation)
-            Hooks.Patch(h, typeof(Serial.FF6.Calc.FunctionProvider), "CreateActFunction", typeof(BattleUi), prefix: nameof(Act_Prefix));
+            // the kit's postfix on CheckForceMissCondition runs last (Priority.Last): after CommandRules'
+            // Spirit evasion and AuditRules' Imp miss, as BattleUi's own did by coming after them in Plugin.cs
+            SnesInformativeMiss.Apply(h, new SnesInformativeMissMod { Name = "Brave New World", Tag = "[battle ui]", Enabled = () => Enabled });
             Harness.Register("bnwui", Command, "bnwui miss | show <enemy> <fail|null|miss> | popup <fail|null|miss> [enemy] | gau | rages | " +
                 "status <slow|haste|stop> <party slot>: BNW's battle UI self-tests (Fail/Null, Rage list, ATB colours)");
             Harness.Register("gauturn", (a, tick) => Turn(Gau, tick), "gauturn: in battle, only Gau's gauge fills until his command menu opens");
@@ -70,179 +52,7 @@ namespace BraveNewWorld.PR
                 "turn <character status id>: in battle, only that character's gauge fills until its command menu opens");
         }
 
-        // --- the status calc ------------------------------------------------------------------------
-
-        public static void Act_Prefix() => kinds.Clear();
-
-        public static void Calc_Prefix(CharacterParameterBase targetParameter)
-        {
-            calcActive = Enabled && targetParameter != null;
-            calcTarget = targetParameter?.Pointer ?? IntPtr.Zero;
-            calcFail = calcNull = false;
-        }
-
-        public static void ForceMiss_Postfix(CharacterParameterBase targetParameter, Condition condition, bool __result)
-        {
-            if (!calcActive || targetParameter == null || condition == null || targetParameter.Pointer != calcTarget) return;
-            try
-            {
-                if (__result)
-                {
-                    if (!PrSpecialRefusals.Contains(condition.ConditionType)) calcFail = true;   // BNW's Spirit evasion
-                    return;
-                }
-                // not forced: the resistance list decides next (AddConditionFunction.Calc); 1 = resists
-                var res = targetParameter.ConfirmedResistanceCondtionList();
-                if (res != null && res.ContainsKey(condition.Id) && res[condition.Id] == 1) calcNull = true;
-            }
-            catch (Exception e) { Hooks.WarnOnce("BattleUi.ForceMiss", e); }
-        }
-
-        public static void Calc_Postfix(FunctionBase __instance, CharacterParameterBase targetParameter)
-        {
-            if (!calcActive) return;
-            calcActive = false;
-            try
-            {
-                if (targetParameter == null) return;
-                var key = targetParameter.Pointer;
-                bool hit = __instance.calcResult?.GetHitType() != HitType.Miss;
-                var kind = hit ? Kind.Miss : calcFail ? Kind.Fail : calcNull ? Kind.Null : Kind.Miss;
-                // several status functions of one act (one frame): BNW sorts them together, and a
-                // status that landed means the act didn't miss there
-                if (kinds.TryGetValue(key, out var was) && was.Frame == Time.frameCount)
-                {
-                    hit |= was.Hit;
-                    if (was.Kind > kind) kind = was.Kind;
-                }
-                kinds[key] = (kind, hit, Time.realtimeSinceStartup, Time.frameCount);
-                if (hit) return;
-                if (kind != Kind.Miss)
-                    Hooks.NoteOnce("miss-" + kind, () => $"[battle ui] a status miss sorted as {kind.ToString().ToUpper()} (BNW's informative miss)");
-            }
-            catch (Exception e) { Hooks.WarnOnce("BattleUi.Calc", e); }
-        }
-
-        internal static Kind? KindFor(BattleUnitData unit)
-        {
-            if (unit == null) return null;
-            var keys = new List<IntPtr>();
-            var p = unit.BattleUnitDataInfo?.Parameter;
-            if (p != null) keys.Add(p.Pointer);
-            var owned = unit.TryCast<BattlePlayerData>()?.ownedCharacterData?.Parameter;
-            if (owned != null) keys.Add(owned.Pointer);
-            foreach (var k in keys)
-                if (kinds.TryGetValue(k, out var v) && Time.realtimeSinceStartup - v.At <= KeepSeconds)
-                {
-                    kinds.Remove(k);
-                    return v.Hit ? null : v.Kind;
-                }
-            return null;
-        }
-
-        // --- the popup ------------------------------------------------------------------------------
-
-        public static void View_Prefix(BattleUnitData targetUnitData, bool isMiss)
-        {
-            pending = null;
-            if (!Enabled || !isMiss) return;
-            try
-            {
-                if ((int)(MessageManager.Instance?.currentLanguage ?? 0) != English) return;
-                var k = forced ?? KindFor(targetUnitData);
-                if (k == Kind.Fail || k == Kind.Null) pending = k;
-            }
-            catch (Exception e) { Hooks.WarnOnce("BattleUi.View", e); }
-        }
-
-        public static void View_Postfix() => pending = null;
-
-        public static void ViewMiss_Postfix(ViewDamageEntity __instance)
-        {
-            if (pending == null) return;
-            var kind = pending.Value;
-            pending = null;
-            try
-            {
-                var image = __instance.prefab?.transform?.GetChild(0)?.GetComponent<UnityEngine.UI.Image>();
-                var sprite = SpriteFor(kind);
-                if (image == null || sprite == null) return;
-                image.sprite = sprite;
-                var rt = image.rectTransform;
-                var z = rt.localScale.z;
-                rt.localScale = new Vector3(sprite.rect.width, sprite.rect.height, z);   // as ViewMiss: the sprite's size in pixels
-                Shown++;
-                Hooks.NoteOnce("popup-" + kind, () => $"[battle ui] {kind.ToString().ToUpper()} shown in place of Miss ({sprite.rect.width}x{sprite.rect.height})");
-            }
-            catch (Exception e) { Hooks.WarnOnce("BattleUi.ViewMiss", e); }
-        }
-
-        // 7 rows per letter, '#' = a letter pixel
-        static readonly Dictionary<char, string[]> Glyphs = new Dictionary<char, string[]>
-        {
-            ['F'] = new[] { "#####", "#....", "#....", "####.", "#....", "#....", "#...." },
-            ['A'] = new[] { ".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#" },
-            ['I'] = new[] { "#", "#", "#", "#", "#", "#", "#" },
-            ['L'] = new[] { "#...", "#...", "#...", "#...", "#...", "#...", "####" },
-            ['N'] = new[] { "#...#", "##..#", "#.#.#", "#.#.#", "#..##", "#...#", "#...#" },
-            ['U'] = new[] { "#...#", "#...#", "#...#", "#...#", "#...#", "#...#", ".###." },
-        };
-        static readonly Dictionary<Kind, Sprite> sprites = new Dictionary<Kind, Sprite>();
-
-        static Sprite SpriteFor(Kind kind)
-        {
-            if (sprites.TryGetValue(kind, out var s) && s != null) return s;
-            string word = kind == Kind.Fail ? "FAIL" : "NULL";
-            var mask = Mask(word, out int w, out int h);
-            var tex = new Texture2D(w, h, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
-            var fill = new Color32(240, 240, 240, 255);
-            var edge = new Color32(24, 24, 40, 255);
-            var clear = new Color32(0, 0, 0, 0);
-            var pixels = new Color32[w * h];
-            for (int y = 0; y < h; y++)
-                for (int x = 0; x < w; x++)
-                {
-                    bool on = mask[y, x], near = false;
-                    for (int dy = -1; dy <= 1 && !near; dy++)
-                        for (int dx = -1; dx <= 1; dx++)
-                        {
-                            int yy = y + dy, xx = x + dx;
-                            if (yy >= 0 && yy < h && xx >= 0 && xx < w && mask[yy, xx]) { near = true; break; }
-                        }
-                    // the texture's rows go bottom-up
-                    pixels[(h - 1 - y) * w + x] = on ? fill : near ? edge : clear;
-                }
-            tex.SetPixels32(pixels);
-            tex.Apply(false, false);
-            tex.hideFlags = HideFlags.HideAndDontSave;   // kept across battles (unused-asset sweeps)
-            s = Sprite.Create(tex, new Rect(0, 0, w, h), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect);
-            s.name = "BNW_" + word;
-            s.hideFlags = HideFlags.HideAndDontSave;
-            sprites[kind] = s;
-            return s;
-        }
-
-        // the word's letter pixels with a 1-pixel border for the outline: [row, column]
-        internal static bool[,] Mask(string word, out int w, out int h)
-        {
-            h = 9;
-            w = 2 + word.Sum(c => Glyphs[c][0].Length) + word.Length - 1;
-            var m = new bool[h, w];
-            int x0 = 1;
-            foreach (var c in word)
-            {
-                var g = Glyphs[c];
-                for (int y = 0; y < 7; y++)
-                    for (int x = 0; x < g[y].Length; x++)
-                        if (g[y][x] == '#') m[y + 1, x0 + x] = true;
-                x0 += g[0].Length + 1;
-            }
-            return m;
-        }
-
         // --- harness self-tests ---------------------------------------------------------------------
-
-        static Kind? forced;   // popup test: the kind for the next popup
 
         static string Command(string[] a)
         {
@@ -266,11 +76,11 @@ namespace BraveNewWorld.PR
         }
 
         // One act of `ab` by the first party member on `enemy`, through the game's functions (nothing
-        // applied): the game's hit type there, and this file's sort of a miss ("FAIL", "NULL", "Miss").
-        // keep: leave the sort for the next popup on that monster.
-        static string RunStatusAct(Ability ab, BattleUnitData caster, BattleUnitData enemy, bool keep)
+        // applied): the game's hit type there, and the kit's sort of a miss ("FAIL", "NULL", "Miss"),
+        // taken from it with the kit's KindFor (as the game's miss popup takes it).
+        static string RunStatusAct(Ability ab, BattleUnitData caster, BattleUnitData enemy)
         {
-            try { return RunStatusActOnce(ab, caster, enemy, keep); }
+            try { return RunStatusActOnce(ab, caster, enemy); }
             catch (Exception e)
             {
                 Hooks.NoteOnce("ui-act-" + ab.Id, () => $"[battle ui] ability {ab.Id} not run: {e.Message}");
@@ -278,7 +88,7 @@ namespace BraveNewWorld.PR
             }
         }
 
-        static string RunStatusActOnce(Ability ab, BattleUnitData caster, BattleUnitData enemy, bool keep)
+        static string RunStatusActOnce(Ability ab, BattleUnitData caster, BattleUnitData enemy)
         {
             var fns = ParameterActFunctionManagment.GetFunction(ab);
             if (fns == null || fns.Count == 0) return "none";
@@ -291,8 +101,7 @@ namespace BraveNewWorld.PR
                 (BattleActData.TargetType)0, BattleActData.ArmType.Right, (BattleActData.ActAbilityType)0, 1, false);
             var results = new Il2CppSystem.Collections.Generic.Dictionary<BattleUnitData, ICalcResult>();
             var attacks = new Il2CppSystem.Collections.Generic.Dictionary<BattleUnitData, ICalcResult>();
-            var tp = enemy.BattleUnitDataInfo?.Parameter;
-            if (tp != null) kinds.Remove(tp.Pointer);
+            SnesInformativeMiss.KindFor(enemy);   // an earlier try's sort goes (one frame: the kit would sort them together)
             string got = "none";
             foreach (var f in fns)
             {
@@ -303,8 +112,8 @@ namespace BraveNewWorld.PR
                 var dic = f.ICalcResultDic ?? results;
                 if (dic.ContainsKey(enemy)) got = dic[enemy].GetHitType().ToString();
             }
-            if (got == "Miss" && tp != null && kinds.TryGetValue(tp.Pointer, out var k) && !k.Hit && k.Kind != Kind.Miss) got = k.Kind.ToString().ToUpper();
-            if (!keep && tp != null) kinds.Remove(tp.Pointer);
+            var k = SnesInformativeMiss.KindFor(enemy);   // null: no sort, or a status landed there
+            if (got == "Miss" && k != null && k != MissKind.Miss) got = k.Value.ToString().ToUpper();
             return got;
         }
 
@@ -316,8 +125,9 @@ namespace BraveNewWorld.PR
         }
 
         // The game's popup for a real status miss on a monster: an ability whose act there the game
-        // misses and this file sorts as `want` (up to 60 tries each), then the game's own miss popup
-        // (BattleUtility.CreateDamageView, as BattleBasicFunction makes it), drawn from that sort.
+        // misses and the kit sorts as `want` (up to 60 tries each), then the game's own miss popup
+        // (BattleUtility.CreateDamageView, as BattleBasicFunction makes it), drawn from that sort (the
+        // one the kit's KindFor took for that monster, handed to the popup as the kit's Forced).
         static string Show(int index, string want)
         {
             var battle = BattlePlugManager.Instance();
@@ -331,15 +141,17 @@ namespace BraveNewWorld.PR
             {
                 for (int i = 0; i < 60; i++)
                 {
-                    var got = RunStatusAct(ab, players[0], enemy, true);
+                    var got = RunStatusAct(ab, players[0], enemy);
                     if (got == "none" || got == "Hit" || got == "Critical") break;   // not a status miss here
                     if (got != target) continue;
-                    int before = Shown;
-                    BattleUtility.CreateDamageView(enemy, 0, false, true);
+                    int before = SnesInformativeMiss.Shown;
+                    SnesInformativeMiss.Forced = got == "FAIL" ? MissKind.Fail : got == "NULL" ? MissKind.Null : MissKind.Miss;
+                    try { BattleUtility.CreateDamageView(enemy, 0, false, true); }
+                    finally { SnesInformativeMiss.Forced = null; }
                     string name = MessageManager.Instance.GetMessage(Content(ab.Id)?.MesIdName ?? "", false);
                     return $"show {want} on monster {index} ({enemy.TryCast<BattleEnemyData>()?.GetMonster()?.Id}): ability {ab.Id} " +
                            $"{name?.Replace("<IC_", "<")} missed as {got} on try {i + 1}; popup drawn as " +
-                           $"{(Shown > before ? target : "the game's Miss")}";
+                           $"{(SnesInformativeMiss.Shown > before ? target : "the game's Miss")}";
                 }
             }
             return $"show {want} on monster {index}: no ability missed that way";
@@ -347,7 +159,7 @@ namespace BraveNewWorld.PR
 
         // In a battle: status-only abilities run on the first monster the way the game runs an
         // act's functions (GetFunction, Init, FixedTarget, HitCalc; nothing applied), each 40
-        // times: what the game made of each try and how this file sorted its misses.
+        // times: what the game made of each try and how the kit sorted its misses.
         static string MissSelfTest()
         {
             var battle = BattlePlugManager.Instance();
@@ -371,7 +183,7 @@ namespace BraveNewWorld.PR
                     var c = new Dictionary<string, int>();
                     for (int i = 0; i < 40; i++)
                     {
-                        var got = RunStatusAct(ab, players[0], enemy, false);
+                        var got = RunStatusAct(ab, players[0], enemy);
                         c[got] = c.TryGetValue(got, out var x) ? x + 1 : 1;
                         if (got == "none") break;
                     }
@@ -404,11 +216,11 @@ namespace BraveNewWorld.PR
             var enemies = battle.GetEnemyUnits();
             if (enemies == null || enemies.Count == 0) return "error: no monster";
             var unit = enemies[Math.Clamp(index, 0, enemies.Count - 1)];
-            forced = kind == "null" ? Kind.Null : kind == "fail" ? Kind.Fail : Kind.Miss;
-            int before = Shown;
+            SnesInformativeMiss.Forced = kind == "null" ? MissKind.Null : kind == "fail" ? MissKind.Fail : MissKind.Miss;
+            int before = SnesInformativeMiss.Shown;
             try { BattleUtility.CreateDamageView(unit, 0, false, true); }
-            finally { forced = null; }
-            return $"popup {kind} on monster {index}: {(Shown > before ? "drawn as " + kind.ToUpper() : "the game's Miss")}";
+            finally { SnesInformativeMiss.Forced = null; }
+            return $"popup {kind} on monster {index}: {(SnesInformativeMiss.Shown > before ? "drawn as " + kind.ToUpper() : "the game's Miss")}";
         }
 
         // A tick handler: in battle, every other party member's gauge held empty and Gau's full until

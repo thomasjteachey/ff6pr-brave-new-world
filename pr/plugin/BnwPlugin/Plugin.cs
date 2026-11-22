@@ -16,7 +16,7 @@ namespace BraveNewWorld.PR
     public class Plugin : BasePlugin
     {
         public const string Guid = "ff6mod.bravenewworld";
-        public const string Version = "0.24.0";
+        public const string Version = "0.25.0";
         internal static ManualLogSource L;
 
         public override void Load()
@@ -155,6 +155,7 @@ namespace BraveNewWorld.PR
             ModSaves.Apply(harmony, "BraveNewWorld");
             EsperHooks.Apply(harmony);
             BattleRewards.Apply(harmony);
+            BattleExtras.Apply(harmony, Config);   // audit C: spear/dual-wield pairing in equip lists; NoGainz (Config "Exp. Gain") + Veldt no EXP / x2 gil
             WeaponProcs.Apply(harmony);
             HardItems.Apply(harmony);
             RelicRules.Apply(harmony);
@@ -190,11 +191,13 @@ namespace BraveNewWorld.PR
             FirstStrike.Enabled = turnRules.Value;
             FirstStrike.Apply(harmony);   // BNW's starting ATB (Speed-weighted; back / preemptive / side cases)
             AuditRules.Apply(harmony, damageRules.Value, turnRules.Value);   // audit batch B: Stamina evasion, fractional on bosses, Imp, counters on misses, back row, 0 MP
+            BattleItems.Apply(harmony, hardItems.Value, damageRules.Value);   // v0.25.0: stars spread, Golem, MP-crit procs (Palidor: profile_bnw)
             AtbRules.Apply(harmony);   // Speed Balance, Quickfill, nATB (the kit's SnesAtb, SnesQuickfill, SnesActionFreeze, BattleSettingsLock)
             CommandRules.Apply(harmony);
             SpecialCommands.Enabled = commandLimits.Value;
             SpecialCommands.Apply(harmony);
             ShopCalls.Apply(harmony);   // the mod's added merchants (SysCall "BNW:shop <group>")
+            MenuRules.Apply(harmony);   // audit C: Ultros's EL respec SysCall, Umaro's equip menu, his airship unequip
             DamageLog.Apply(harmony);
             EsperMenu.Apply(harmony);
             EsperList.Apply(harmony);
@@ -202,10 +205,11 @@ namespace BraveNewWorld.PR
             BnwEnemyAi.Apply(harmony, dataPath);   // no switch: the port gives these monsters only the plugin's shim
             if (encounterRates.Value) BnwEncounters.Apply(harmony, dataPath, randomEncounters);
             DialogText.Apply(harmony, Path.GetDirectoryName(dataPath), Config);   // BNW's script / Vanilla New World's on the story lines
-            BattleUi.Apply(harmony, Config);   // "Fail" / "Null" in place of Miss, Rage list tests; after CommandRules (its forced misses)
+            BattleUi.Apply(harmony, Config);   // "Fail" / "Null" in place of Miss (the kit's SnesInformativeMiss, after CommandRules' forced misses), Rage list tests
             EngineRules.Apply(harmony, damageRules.Value, stealRules.Value, turnRules.Value);   // elemental share, Mug, Rage statuses + engine self-tests (after EsperHooks, CommandRules)
             EsperResultRows.Apply(harmony);   // "<name> gained an EL" on the victory screen
             HarnessItems.Register();   // harness: bnwgive <item> [n], exp
+            PartyEvents.Register();   // harness: bnwgear [strip <ids>] (audit C party events QA)
             ExploderRule.Enabled = damageRules.Value;
             ExploderRule.Apply(harmony);   // a party member's Exploder: 250% of the user's current HP
             MindblowRule.Enabled = damageRules.Value;
@@ -252,6 +256,7 @@ namespace BraveNewWorld.PR
             if (frame % 120 == 0) EsperHooks.UnequipDisallowed();   // old saves: espers BNW forbids that character
             if (frame % 60 == 30) Schematics.Sync();   // Figaro's World of Ruin soldier as Julian; Auto Crossbow's numbers
             if (frame % 10 == 0) { BattleRewards.Track(); WaitGauge.Track(); StatusTicks.Track(); }
+            if (frame % 300 == 200) MenuRules.Track();   // one-time log self-test (Umaro's menu)
             if (frame % 10 == 5) BnwMonsterImages.Track();   // the final battle tower: a statue part that dies leaves the picture
             BattleFormulas.Track();  // Shock's cost to its user, after its hits
             if (verified && frame % 300 == 0) { HardItems.Fix(); RelicRules.SetConstants(); }

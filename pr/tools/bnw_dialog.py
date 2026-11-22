@@ -179,6 +179,7 @@ EXTRA_OPTIONS = {
 ADDED_DIALOGUES = [
     0xA56, 0xA57, 0xA58, 0xA59, 0xAC3, 0xAC4, 0xB19,   # Bob at Dragon's Neck Cabin (SNES map 186, CB/4F27)
     0xA5A, 0xA55,                                       # Bob at the Coliseum (413, CB/4F85)
+    0xA5B, 0xA5C, 0xA5D, 0xA5E, 0xA5F,                  # Ultros's EL respec (413, CB/4E5E; port_bnw_menus)
     0x8C8, 0x8C9, 0x9E6,                                # the Cultists' Tower seller (362, CC/51FF)
     0x675,                                              # Mikhail points Edgar to Julian (Figaro, SNES 58, CB/5201; DialogText)
     0x16B, 0x16C, 0x16D,                                # the Returners' briefing's end (CB/034D; port_bnw_scenes)

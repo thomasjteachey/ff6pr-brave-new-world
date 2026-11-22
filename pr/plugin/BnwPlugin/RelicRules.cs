@@ -57,7 +57,9 @@ namespace BraveNewWorld.PR
             var calc = typeof(CalcExecuteCorrection);
             Hooks.Patch(h, calc, "IsUseMpCriticalOccurrence", typeof(RelicRules), postfix: nameof(MpCrit_Postfix));
             Hooks.Patch(h, calc, "GetAccessoryPhysicalCorrectionValue", typeof(RelicRules), postfix: nameof(Physical_Postfix));
-            Hooks.Patch(h, calc, "GetAccessoryMagicCorrectionValue", typeof(RelicRules), postfix: nameof(Magic_Postfix));
+            // GetAccessoryMagicCorrectionValue is inlined (no call sites), so the magic rule sits on the count
+            // MagicExecution reads: GetEquipAccessoryNum(user, MagicCorrectionAccessoryIds[0]) (x1 + 0.25 x count)
+            Hooks.Patch(h, calc, "GetEquipAccessoryNum", typeof(RelicRules), postfix: nameof(MagicCount_Postfix));
             var util = typeof(Serial.FF6.Management.SerialBattleUtility);
             Hooks.Patch(h, util, "CreateContinuousActData", typeof(RelicRules),
                 prefix: nameof(Continuous_Prefix), postfix: nameof(Continuous_Postfix));
@@ -394,6 +396,40 @@ namespace BraveNewWorld.PR
             catch (Exception e) { Hooks.WarnOnce("RelicRules.Physical", e); }
         }
 
+        static System.Reflection.PropertyInfo magicListProp;
+
+        static IntPtr MagicListPtr()
+        {
+            magicListProp ??= typeof(CalcExecuteCorrection).GetProperty("MagicCorrectionAccessoryIds",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            var dict = magicListProp?.GetValue(null) as Il2CppSystem.Collections.Generic.Dictionary<int, Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<int>>;
+            return dict != null && dict.ContainsKey(0) ? dict[0].Pointer : IntPtr.Zero;
+        }
+
+        // BNW (c2.asm:731): one +25% however many magic relics; the esper's +25% when none (c0.asm 296-330)
+        public static void MagicCount_Postfix(OwnedCharacterData ownedCharacterData,
+            Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<int> equipIds, ref int __result)
+        {
+            if (!Enabled || ownedCharacterData == null || equipIds == null) return;
+            try
+            {
+                var list = MagicListPtr();
+                if (list == IntPtr.Zero || equipIds.Pointer != list) return;
+                if (FormulaProbe.Active) { __result = 0; return; }  // probe: no relic boosts
+                int was = __result;
+                if (__result > 1) __result = 1;
+                if (__result == 0)
+                {
+                    var esper = EquippedEsper(ownedCharacterData);
+                    if (esper != null && esper.Equip.MagicPct > 0) __result = 1;
+                }
+                int now = __result;
+                Hooks.NoteOnce("magic-count-" + Math.Min(was, 2) + now, () => $"[relics] magic boost relics {was} -> {now} ({ownedCharacterData.Name})");
+            }
+            catch (Exception e) { Hooks.WarnOnce("RelicRules.MagicCount", e); }
+        }
+
+        // the old hook (GetAccessoryMagicCorrectionValue): inlined by the game, never runs; kept for reference
         public static void Magic_Postfix(OwnedCharacterData ownedCharacterData, ref int equipNum, ref float __result)
         {
             if (FormulaProbe.Active) { __result = 0f; return; }  // probe: no relic boosts

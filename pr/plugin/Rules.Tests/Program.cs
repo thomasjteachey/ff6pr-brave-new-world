@@ -56,6 +56,10 @@ static class Program
         Test("BNW's join levels (no averaging, World of Ruin floors)", JoinLevelRule);
         Test("BNW's ATB numbers and command waits in seconds (Speed Balance, C2/067B)", AtbWaits);
         Test("audit batch B data (Stamina-only evasion, fractional on bosses, respect row, 0 MP deaths)", AuditData);
+        Test("battle items data (spread stars, MP-crit procs)", BattleItemsData);
+        Test("spears and dual wield (c3.asm DW_Chk, c1.asm SwapDual)", DualWieldPairs);
+        Test("NoGainz and the Veldt (noexp_overhaul.asm): no EXP or EP, SP banks, gil x2", NoGainzRewards);
+        Test("Ultros's EL respec (RespecELs)", ElRespec);
 
         Console.WriteLine($"\n{passes} passed, {failures} failed");
         return failures;
@@ -785,4 +789,92 @@ static class Program
         Eq("124 127 130 132 133 139", string.Join(" ", D.RespectRowAbilities.OrderBy(x => x)), "BNW's physical respect-row skills");
         True(D.DieAtZeroMp.Count >= 47, $"monsters dying at 0 MP: {D.DieAtZeroMp.Count} (47 SNES monsters + Coliseum copies)");
     }
+    // the lists BattleItems reads (bnw_plugin_data.proc_rules, port_procs' copies; c4.asm SpellCastId / CastTarget)
+    static void BattleItemsData()
+    {
+        var p = D.Procs;
+        Eq("159 161", string.Join(" ", p.ThrowSpread.OrderBy(x => x)), "stars a Throw may spread (Shuriken, Ninja Star content ids)");
+        Eq(1, p.CritSwap.Count, "one MP-crit swap (Doom's proc copy -> X-Zone's)");
+        int xzone = p.CritSwap.Values.First();
+        True(p.CritAllEnemies.Contains(xzone), "X-Zone's copy hits all enemies");
+        Eq(2, p.CritAllEnemies.Count, "Quartr's and X-Zone's copies hit all enemies");
+        True(p.CritAllEnemies.Any(c => p.NoCrit.Contains(c)), "Quartr's copy is never critical (spell byte 7 bit 5)");
+        Eq(3, p.NoCrit.Count, "never-critical proc copies: Holy, Flare, Quartr");
+    }
+    // BNW's equip-menu check as the asm reads it (c3.asm Item_Chk, C3/F13D); flags = weapon byte 12 & $18
+    static bool DwChk(int held, int picked)
+    {
+        if (held == 0x08) return false;               // only "Gauntlet" (a spear): no off-hand weapon
+        if (held == 0x10) return picked != 0x08;      // only "Genji Glove": anything but a spear
+        return picked == 0x10;                        // neither or both: only a dual-wield weapon
+    }
+
+    // BNW's in-battle swap (c1.asm FlagDual / SwapDual / CanDual): $18 sets neither bit; "block" on either
+    // weapon or no "enable" on both = no dual wield
+    static bool SwapDual(int a, int b)
+    {
+        int Bits(int f) => f == 0x18 ? 0 : f >> 3;    // bit 1 enable, bit 0 block
+        int m = Bits(a) | Bits(b);
+        return (m & 1) == 0 && (m & 2) != 0;
+    }
+
+    static void DualWieldPairs()
+    {
+        WeaponGrip G(int f) => DualWieldRules.Grip((f & 0x08) != 0, (f & 0x10) != 0);
+        var flags = new[] { 0x00, 0x08, 0x10, 0x18 };
+        foreach (var a in flags)
+            foreach (var b in flags)
+            {
+                Eq(DwChk(a, b), DualWieldRules.MayPair(G(a), G(b)), $"menu: ${a:X2} held, ${b:X2} picked");
+                Eq(SwapDual(a, b), DualWieldRules.MayPair(G(a), G(b)), $"battle swap: ${a:X2} + ${b:X2}");
+            }
+        Eq(WeaponGrip.Spear, G(0x08), "Mythril Pike's bits");
+        Eq(false, DualWieldRules.MayPair(WeaponGrip.DualWield, WeaponGrip.Spear), "no spear beside a dagger");
+        Eq(false, DualWieldRules.MayPair(WeaponGrip.Spear, WeaponGrip.DualWield), "nothing beside a spear");
+        Eq(false, DualWieldRules.MayPair(WeaponGrip.Both, WeaponGrip.Both), "no two katanas");
+        Eq(false, DualWieldRules.MayPair(WeaponGrip.Both, WeaponGrip.None), "no plain sword beside a katana");
+        Eq(true, DualWieldRules.MayPair(WeaponGrip.Both, WeaponGrip.DualWield), "a dagger beside a katana");
+        Eq(true, DualWieldRules.MayPair(WeaponGrip.DualWield, WeaponGrip.None), "a plain sword beside a dagger");
+    }
+
+    static void NoGainzRewards()
+    {
+        Eq(1000, RewardRules.Exp(1000, false, false), "EXP normally");
+        Eq(0, RewardRules.Exp(1000, true, false), "NoGainz: no EXP");
+        Eq(0, RewardRules.Exp(1000, false, true), "Veldt: no EXP");
+        Eq(500, RewardRules.Gil(500, false, false), "gil normally");
+        Eq(1000, RewardRules.Gil(500, true, false), "NoGainz: gil x2");
+        Eq(1000, RewardRules.Gil(500, false, true), "Veldt: gil x2");
+        Eq(1000, RewardRules.Gil(500, true, true), "both: x2 once (one ASL)");
+        Eq(int.MaxValue / 2, RewardRules.Gil(int.MaxValue, true, false), "no overflow");
+        // EP follows EXP (Calc_EP: XP/8 x SP); the SP bank still fills (Add_EP from C2/6235)
+        var p = new EsperProgress();
+        Eq(0, EsperRules.AfterBattle(D, ref p, 1, true, RewardRules.Exp(4000, true, false), 3), "no EL");
+        Eq(0, p.Ep, "no EP");
+        Eq(3, p.SpBank, "SP banked");
+    }
+
+    // ---- the test function for Rules.Tests/Program.cs (Test("Ultros's EL respec (RespecELs)", ElRespec)) ----
+    static void ElRespec()
+    {
+        var p = EsperProgress.Empty;
+        p.Ep = 12345; p.El = 9; p.ElBank = 2; p.SpBank = 17;
+        p.Spent = new StatBonus { Hp = 120, Mp = 15, Power = 3, Agility = 1, Vitality = 2, Magic = 1 };
+        var r = RespecRules.Respec(p);
+        Eq(9, r.ElBank, "every EL earned back in the bank");
+        Eq(9, r.El, "EL kept");
+        Eq(12345, r.Ep, "EP kept");
+        Eq(17, r.SpBank, "SP bank kept");
+        True(r.Spent != null && r.Spent.IsEmpty, "no bonuses left");
+        Eq(120, p.Spent.Hp, "the original is untouched");
+        var w = r.Pack();
+        var back = EsperProgress.Unpack(w[0], w[1], w[2]);
+        Eq(9, back.ElBank, "packs: bank");
+        True(back.Spent.IsEmpty, "packs: nothing spent");
+        Eq(25000, RespecRules.Price(false), "first respec 25,000 GP (CB/4E7D)");
+        Eq(100000, RespecRules.Price(true), "later ones 100,000 GP (CB/4E8D: 60,000 + 40,000)");
+        True(RespecRules.Respecs(1) && RespecRules.Respecs(12), "Terra and Gau respec");
+        True(!RespecRules.Respecs(13) && !RespecRules.Respecs(14) && !RespecRules.Respecs(0), "Gogo, Umaro and guests don't");
+    }
+
 }
