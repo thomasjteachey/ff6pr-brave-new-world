@@ -4,6 +4,13 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
 
 ## Live progress (newest first)
 
+- 2026-11-23 (BNW 0.25.0 session): **v0.26.3 released on GitHub (Latest) and on the Nexus draft (mod 167, private).**
+  https://github.com/thomasjteachey/ff6pr-brave-new-world/releases/tag/v0.26.3
+  - Vargas froze after Gale Cut (user, Deck): BattleAI.ViewMes threw ErrorFactorBase every frame after BattleEvent 07
+    (the PR's Mash-joins scene holds the message window). Fix (kit SnesAiHostHooks.cs, another session's edit): after a
+    PR-played battle event, the turn's remaining attack and battle lines are dropped. Laptop run 20261123-120754: lines
+    dropped, battle ends, field runs on. Kit source not yet published (pin 6a1024c); the DLL carries it.
+  - Zip SHA-256 ecf2e4e6...0c5a; DLL md5 e4ae6dda = PC install (the Deck has 639d69f0: same code labelled 0.26.2; the game was running). The 11-22 "v0.26.2" release by another session was the renge-only attempt that didn't cure it.
 - 2026-11-22 (BNW 0.25.0 session): **v0.26.1 released on GitHub (Latest) and on the Nexus draft (mod 167, private).**
   https://github.com/thomasjteachey/ff6pr-brave-new-world/releases/tag/v0.26.1
   - User-reported fixes (notes: boomerang-dual-wield.md): `<d7>` before boomerang names (ff6snes ICONS from 0xD7);
