@@ -293,7 +293,10 @@ class AiScripts(unittest.TestCase):
         mod_lines, mod_speakers = text_keys("story_mes_en.txt"), text_keys("story_cha_en.txt")
         sys.path.insert(0, os.path.join(PR, "tools"))
         import port_ai
-        shim_rows = [m["mnemonic"] for m in port_ai.shim_script(1)]
+        shim = port_ai.shim_script(1)
+        shim_rows = [m["mnemonic"] for m in shim]
+        msg = next(m["operands"] for m in shim if m["mnemonic"] == "ExecMsg")
+        self.assertEqual(msg["iValues"], [1] + [0] * 7, "ExecMsg must provide the integer operands read by Msg")
         for path in compiled_scripts():
             name = os.path.basename(path)
             doc = json.load(open(path, encoding="utf-8"))

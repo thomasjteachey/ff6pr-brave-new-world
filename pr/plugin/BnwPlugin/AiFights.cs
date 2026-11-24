@@ -32,7 +32,31 @@ namespace BraveNewWorld.PR
             Harness.Register("ko", a => Ko(a), "ko [PR monster id]: an enemy to 0 HP through the game's death check");
             Harness.Register("aistat", _ => Stat(), "aistat: the battle's phase, enemies, the AI host's counts and last acts");
             Harness.Register("endfight", _ => Host.KillAllForTest("endfight"), "endfight: every enemy left dies the game's way");
+            Harness.Register("aipummel", _ => Pummel(), "aipummel: queue Sabin's Pummel in the solo phase of the Vargas story fight");
             Harness.Register("flag", a => Flag(a), "flag <category> <index> [value]: read (or set) a script variable, e.g. flag ScenarioFlag2 221 1");
+        }
+
+        // Queue the same battle action as a selected Pummel. Keep the story script and damage pipeline active.
+        static string Pummel()
+        {
+            var battle = BattlePlugManager.Instance();
+            if (battle == null || !battle.IsBattle()) return "error: not in a battle";
+            var players = battle.GetPlayerUnits().Where(p => p != null).ToArray();
+            var vargas = battle.GetEnemyUnits().FirstOrDefault(e => e?.GetMonster()?.Id == 260);
+            if (players.Length != 1 || players[0].ownedCharacterData?.characterStatusId != 6 || vargas == null)
+                return "error: Vargas is not fighting Sabin alone";
+            var sabin = players[0];
+
+            var command = PrKit.Master.Get<Last.Data.Master.Command>(15);
+            var ability = PrKit.Master.Get<Last.Data.Master.Ability>(132);
+            var abilities = new Il2CppSystem.Collections.Generic.List<Last.Data.Master.Ability>();
+            abilities.Add(ability);
+            var targets = new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppReferenceArray<BattleUnitData>(1);
+            targets[0] = vargas;
+            var act = new BattleActData(sabin, targets, command, abilities, BattleActData.ActType.Normal,
+                BattleActData.TargetType.SingleEnemy, BattleActData.ArmType.Right, (BattleActData.ActAbilityType)0, 1, false);
+            battle.BattleActExection.SetBattleActData(act);
+            return $"queued Sabin's Pummel against Vargas at {Harness.Hp(vargas)} (Sabin corps index {sabin.corpsIndex})";
         }
 
         // the event scripts' variables (DataStorage: ScenarioFlag1-4, TreasureFlag1-4, ScenarioVariable...), by the
