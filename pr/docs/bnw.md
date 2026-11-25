@@ -15,7 +15,11 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
   Vargas run loaded the laptop's own save (Mog alone) and stopped after Sabin's join, an invalid run; the save was
   sent again (remote_batch send_tar) before the rerun. Zip SHA-256
   `6d25574145bec860dea573df353c42b433b3521af1b7cf9b605aa34ddf3511b9`, DLL md5 3965937b
-  (build/dist/archive/BraveNewWorld-PR-0.26.7.zip).
+  (build/dist/archive/BraveNewWorld-PR-0.26.7.zip). Nexus: file 623 "Brave New World 0.26.7" main + primary, 0.26.6
+  archived, mod version 0.26.7, still not_published. The release's run uploaded the file but its changelog call
+  failed ("Mod not found: 167": v3 wants the mod's uid); the workflow now passes the uid (BNW repo 95b685d) and a
+  changelog_only run posted 0.26.7's notes. The PC and the Deck still run bb5f00d0 (0.26.7's code and data, labelled
+  0.26.6): Codex's capture runs held the PC game folder.
 
 - 2026-11-25: Banon's join level (the user: Banon dies on the Lete River raft to Fireball plus one hit). The guests
   (statusId 15-30) took the PR's own first-join offsets, vanilla's; BNW's ROM gives Banon +2 (vanilla -3) and some
