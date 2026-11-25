@@ -16,7 +16,7 @@ namespace BraveNewWorld.PR
     public class Plugin : BasePlugin
     {
         public const string Guid = "ff6mod.bravenewworld";
-        public const string Version = "0.26.6";
+        public const string Version = "0.26.7";
         internal static ManualLogSource L;
 
         public override void Load()
@@ -89,7 +89,7 @@ namespace BraveNewWorld.PR
             // a new key: the old "nATB" (default off, and it never stopped time) stays in players' config files as false
             var natb = Config.Bind("Battle", "nATBOnly", true,
                 "BNW's nATB: time stops while an action plays out (ATB gauges, waits, status timers) and in the battle " +
-                "menus. As in BNW there is no Active/Wait or Battle Speed setting: those Config rows are hidden and battles " +
+                "menus. BNW hides Battle Speed and, without Battle Options, Battle Mode. With Battle Options, Battle Mode offers Wait/Pause. Battles " +
                 "run in Wait (your saved settings stay as they are for other games and mods; BNW's ATB fill ignores the battle speed, its waits are timed through it).");
             var encounterRates = Config.Bind("Field", "EncounterRates", true,
                 "Random battles come at BNW's SNES rates: its danger counter per map and world zone, at least ~10 steps " +
@@ -255,6 +255,7 @@ namespace BraveNewWorld.PR
             if (++frame % 30 == 0) EsperStore.Invalidate();
             if (frame % 120 == 0) EsperHooks.UnequipDisallowed();   // old saves: espers BNW forbids that character
             if (frame % 60 == 30) Schematics.Sync();   // Figaro's World of Ruin soldier as Julian; Auto Crossbow's numbers
+            if (frame % 120 == 90) JoinLevels.Sync();   // older saves: a Banon who joined at the PR's -3 raised once
             if (frame % 10 == 0) { BattleRewards.Track(); WaitGauge.Track(); StatusTicks.Track(); }
             if (frame % 300 == 200) MenuRules.Track();   // one-time log self-test (Umaro's menu)
             if (frame % 10 == 5) BnwMonsterImages.Track();   // the final battle tower: a statue part that dies leaves the picture

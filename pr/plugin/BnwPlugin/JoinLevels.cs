@@ -25,7 +25,10 @@ namespace BraveNewWorld.PR
         internal static string LastJoin;   // tests
         const int CollapseFlag = 41;       // ScenarioFlag2 41: the world has collapsed (Schematics.cs, WC)
         static readonly string[] Names = { "", "Terra", "Locke", "Cyan", "Shadow", "Edgar", "Sabin", "Celes", "Strago", "Relm",
-                                           "Setzer", "Mog", "Gau", "Gogo", "Umaro" };
+                                           "Setzer", "Mog", "Gau", "Gogo", "Umaro", "Banon", "Leo", "Ghost", "Ghost" };
+        // EsperStore.Flags bit (Schematics has bit 0): Banon's level is BNW's (he joined under JoinRules' +2, or a Banon
+        // from an older build was raised once by Repair)
+        const int FlagBanonLevel = 2;
 
         public static void Apply(Harmony h)
         {
@@ -58,8 +61,10 @@ namespace BraveNewWorld.PR
                 }
                 if (target > before) Raise(id, target, isFirstTimeJoin);
                 int after = Level(id);
-                string rule = isFirstTimeJoin ? $"average {average} {JoinRules.FirstJoinOffset[id - 1]:+0;-0;+0}" + (wor ? $", floor {JoinRules.RejoinLevel[id - 1]}" : "")
-                    : wor ? $"floor {JoinRules.RejoinLevel[id - 1]}" : "no averaging";
+                if (id == JoinRules.Banon && isFirstTimeJoin) MarkBanon();
+                bool party = id >= 1 && id <= 14;   // the guests have no World of Ruin floor
+                string rule = isFirstTimeJoin ? $"average {average} {JoinRules.OffsetOf(id):+0;-0;+0}" + (wor && party ? $", floor {JoinRules.RejoinLevel[id - 1]}" : "")
+                    : wor && party ? $"floor {JoinRules.RejoinLevel[id - 1]}" : "no averaging";
                 LastJoin = $"{what}: level {before} -> {after} (BNW: {rule}; the PR's average {average})";
                 Plugin.L.LogInfo("[joins] " + LastJoin);
                 return false;
@@ -90,6 +95,44 @@ namespace BraveNewWorld.PR
                     n++;
                 }
             return n == 0 ? 1 : sum / n;
+        }
+
+        static void MarkBanon()
+        {
+            if (EsperStore.Available) EsperStore.Flags |= FlagBanonLevel;
+        }
+
+        // Saves from builds before Banon's +2 (BnwRunner, every few seconds): a Banon who already joined at the PR's -3 is
+        // raised once (JoinRules.BanonRepair), on the field, outside battle. A Banon who hasn't joined yet waits for
+        // CorrectLevel, which marks the save; one who has left stays as he is.
+        internal static string LastRepair;   // tests
+        internal static void Sync()
+        {
+            if (!Enabled || !EsperStore.Available || (EsperStore.Flags & FlagBanonLevel) != 0) return;
+            try
+            {
+                var bm = Last.Battle.BattlePlugManager.Instance();
+                if (bm != null && bm.IsBattle()) return;
+                if (UnityEngine.Object.FindObjectOfType<global::FieldMap>()?.fieldController == null) return;
+                Repair();
+            }
+            catch (Exception e) { Hooks.WarnOnce("JoinLevels.Sync", e); }
+        }
+
+        static void Repair()
+        {
+            int id = JoinRules.Banon, before = Level(id);
+            bool here = Available(id);
+            if (!here && before <= 1) return;   // he hasn't joined in this save: CorrectLevel will do it
+            if (here)
+            {
+                int average = Average(id), want = JoinRules.BanonRepair(before, average);
+                if (want > 0) Raise(id, want, false);
+                LastRepair = $"Banon (joined before BNW's +2): level {before} -> {Level(id)} (average {average} +2, at most +5)";
+            }
+            else LastRepair = $"Banon has left the party: level {before} kept";
+            MarkBanon();
+            Plugin.L.LogInfo("[joins] " + LastRepair);
         }
 
         // CorrectLevel's own raise: the level's total exp, the stat-up provider, the owned-character client
@@ -140,7 +183,7 @@ namespace BraveNewWorld.PR
                 int a = Average(id), want = JoinRules.Target(id, true, ruin, a);
                 Join(id);
                 Check(Available(id) && Level(id) == want, $"first join: {Name(id)} level {Level(id)}, want {want} (average {a} " +
-                    $"{JoinRules.FirstJoinOffset[id - 1]:+0;-0;+0}; vanilla's offset {JoinRules.VanillaFirstJoinOffset[id - 1]:+0;-0;+0})");
+                    $"{JoinRules.OffsetOf(id):+0;-0;+0}; vanilla's offset {JoinRules.VanillaOffsetOf(id):+0;-0;+0})");
             }
             try
             {
@@ -200,6 +243,32 @@ namespace BraveNewWorld.PR
                 int f = Level(JoinRules.Gogo) <= 1 ? JoinRules.Gogo : Level(JoinRules.Umaro) <= 1 ? JoinRules.Umaro : 0;
                 if (f != 0) FirstJoin(f, false);
                 else lines.Add("skipped: Gogo and Umaro have both joined");
+
+                // a guest's first join: Banon at the average + BNW's +2 (the PR's own table: -3); it marks the save
+                World(false);
+                int b = JoinRules.Banon;
+                if (Level(b) <= 1 && !Available(b))
+                {
+                    FirstJoin(b, false);
+                    Check((EsperStore.Flags & FlagBanonLevel) != 0, "Banon's first join marks the save");
+                }
+                else lines.Add("skipped: Banon has joined (no first join to check)");
+
+                // a save from an older build (unmarked, Banon behind the party): raised once, at most 5 levels
+                if (Available(b) && EsperStore.Available)
+                {
+                    int lb = Level(b);
+                    if (lb < 89) foreach (int o in Roster()) if (Level(o) < lb + 10) Raise(o, lb + 10, false);
+                    int avgB = Average(b), wantB = Math.Max(lb, Math.Min(avgB + 2, lb + 5));
+                    EsperStore.Flags &= ~FlagBanonLevel;
+                    Sync();
+                    Check(Level(b) == wantB && (EsperStore.Flags & FlagBanonLevel) != 0,
+                        $"older save: {LastRepair}, want {wantB} (the PR's average {avgB})");
+                    int again = Level(b);
+                    Sync();
+                    Check(Level(b) == again, $"the repair runs once a save: Banon stays at {Level(b)}");
+                }
+                else lines.Add("skipped: Banon isn't in the roster (no repair to check)");
             }
             catch (Exception e) { ok = false; lines.Add("FAILED: " + e.GetType().Name + ": " + e.Message); }
             finally { World(wasRuin == 1); }

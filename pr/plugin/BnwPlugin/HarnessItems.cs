@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Last.Data.Master;
 using Last.Management;
+using Last.Map;
 using Harness = PrKit.Harness;
 
 namespace BraveNewWorld.PR
@@ -19,8 +20,22 @@ namespace BraveNewWorld.PR
             Harness.Register("bnwhp", a => Hp(), "bnwhp: each party member's HP and MP");
             Harness.Register("bnwnpcs", a => Npcs(), "bnwnpcs: the current map's NPCs: entity id, action (2 runs the script, 4 only " +
                 "talks), script id, message key (QA: Bob's cabin NPC must be action 2 with script 9963)");
+            Harness.Register("bnwfocus", Focus, "bnwfocus <field entity id>: stage the party at an existing map entity for a background scene capture (memory only)");
             Harness.Register("bnwequip", Equip, "bnwequip <party index 0-3> <PR weapon id> [hand slot 1|2]: put that weapon in the " +
                 "member's hand (given first if not owned; memory only), for weapon-effect checks (QA bnw-weapons)");
+        }
+
+        static string Focus(string[] a)
+        {
+            if (a.Length != 1 || !int.TryParse(a[0], out int id)) return "error: bnwfocus <field entity id>";
+            var fc = UnityEngine.Object.FindObjectOfType<FieldMap>()?.fieldController;
+            var target = fc?.GetFieldEntity(id);
+            var player = fc?.player;
+            if (player == null || target == null) return $"error: field player or entity {id} unavailable";
+            var before = player.GetEntityPosition();
+            var at = target.GetEntityPosition();
+            player.OverwriteEntityPosition(target);
+            return $"bnwfocus: party {before.x:0.#},{before.y:0.#} -> entity {id} at {at.x:0.#},{at.y:0.#}";
         }
 
         // the party's own data (UserDataManager's list, not the clones)

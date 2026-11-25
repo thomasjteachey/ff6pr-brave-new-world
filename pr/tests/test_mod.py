@@ -445,6 +445,32 @@ class Encounters(unittest.TestCase):
             self.skipTest("no BNW ROM")
         return SN.Rom(path)
 
+    def test_join_offsets_from_bnw_rom(self):
+        """plugin/Rules/JoinRules.cs: BNW's first-join offsets are the ROM's (each character's init byte 21 bits 2-3,
+        ED/7CB5 + 22 n, into C0/A228's +0/+2/+5/-3: C0/A11A), for the party (statusId 1-14 = SNES 0-13) and the
+        guests (statusId 15-30 = SNES 14-29: Banon's +2 is BNW's, vanilla -3); the vanilla tables are the US ROM's."""
+        import re
+        import ff6snes as SN
+        rom = self.bnw_rom()
+        van = SN.Rom(P.VANILLA_ROM)
+        with open(os.path.join(PR, "plugin", "Rules", "JoinRules.cs"), encoding="utf-8") as f:
+            src = f.read()
+
+        def table(name):
+            m = re.search(r"\b" + name + r"\s*=\s*\{([^}]*)\}", src)
+            self.assertIsNotNone(m, name)
+            return [int(x) for x in m.group(1).split(",")]
+
+        def offsets(r, first, n):
+            steps = list(r.data[0xA228:0xA22C])   # C0/A228: 0, 2, 5, 253
+            self.assertEqual(steps, [0, 2, 5, 253])
+            return [(0, 2, 5, -3)[(r.data[0x2D7CA0 + 22 * c + 21] >> 2) & 3] for c in range(first, first + n)]
+
+        self.assertEqual(table("FirstJoinOffset"), offsets(rom, 0, 14))
+        self.assertEqual(table("VanillaFirstJoinOffset"), offsets(van, 0, 14))
+        self.assertEqual(table("GuestFirstJoinOffset"), offsets(rom, 14, 16))
+        self.assertEqual(table("VanillaGuestFirstJoinOffset"), offsets(van, 14, 16))
+
     def test_encounter_rates_from_bnw_rom(self):
         """bnw_data.json's encounters (the plugin's BnwEncounters / the kit's SnesEncounters): BNW's world
         zone codes byte for byte, its battle roll 4 + random x 233 / 256 (C0/C48C), vanilla's rate tables
@@ -884,6 +910,39 @@ class BnwFidelity(unittest.TestCase):
         fg = merged("function_group")[int(a["battle_function_group_id"])]
         self.assertIn(("9", "16"), [(fg[f"function{k}_id"], fg[f"function{k}_value1"]) for k in (1, 2, 3)])
 
+    def test_fixed_heal_items(self):
+        """BNW's fixed-amount heals heal BNW's amounts (port.py port_item_effects; the user 2026-11-25: Dried Meat
+        said 100 and healed vanilla's 150). Every SNES consumable healing a fixed HP/MP amount (byte 19 0x08/0x10,
+        no 0x80 fraction or 0x20 lift) heals its power; Red Bull (Echo Screen's row) and Slim Jim (Smoke Bomb's)
+        heal and add their statuses instead of curing Mute and running away."""
+        import ff6snes as SN
+        import idmap as M
+        import profiles
+        rom = SN.Rom(profiles.PROFILES["bnw"].rom)
+        items, fg, cg = merged("item"), merged("function_group"), merged("condition_group")
+
+        def funcs(gid):
+            g = fg[int(gid)]
+            return [tuple(int(g[f"function{k}_{c}"]) for c in ("id", "value1")) for k in (1, 2, 3)
+                    if g[f"function{k}_id"] != "0"]
+        for it in SN.items(rom):
+            m = M.item(it.id)
+            f = it.raw[19]
+            if it.type == "item" and m and m[0] == "item" and f & 0x18 and not f & 0xA0:
+                self.assertEqual(items[m[1]]["standard_value"], str(it.power), it.name)
+        self.assertEqual(items[23]["standard_value"], "100", "Dried Meat: 'Cures 100 HP'")
+        red_bull, slim_jim = items[20], items[21]
+        self.assertEqual(red_bull["standard_value"], "200", "Red Bull: 'Cures 200 HP'")
+        self.assertEqual(funcs(red_bull["battle_function_group_id"]), [(1, 1), (9, 17)], "Red Bull: HP + Float")
+        self.assertEqual(funcs(red_bull["menu_function_group_id"]), [(1, 1)], "Red Bull in the menu: HP")
+        self.assertEqual(slim_jim["standard_value"], "100")
+        battle = funcs(slim_jim["battle_function_group_id"])
+        self.assertEqual(battle[0], (1, 1), "Slim Jim heals HP")
+        self.assertEqual(battle[1][0], 10, "Slim Jim adds a condition group")
+        self.assertEqual(sorted(r["condition_id"] for r in cg if r["group_id"] == str(battle[1][1])), ["20", "21"],
+                         "Slim Jim: Regen + Haste")
+        self.assertEqual(slim_jim["menu_function_group_id"], "0", "Slim Jim: battle only (byte 0 bit 6 clear)")
+
     # the PR's weapons that can't be gripped (Serial.FF6.Management.EquipmentAbilityData
     # .InvaliteTwoHandeds, its constructor: tools/decomp/twohand), content ids
     PR_NO_GRIP = {0x7a, 0x9f, 0xa0, 0xa1, 0xa3, 0xa5, 0xa6, 0xa7, *range(0xa9, 0xb8)}
@@ -1153,11 +1212,32 @@ class Dialogue(unittest.TestCase):
         # name for the key (keys only in the file, no text)
         names = self.data.get("names", {})
         self.assertEqual(names.get("E0439_00_020_a_03"), ["MSG_ARMOR_NAME_103"])
-        self.assertEqual(names.get("E0963_00_192_a_01"), ["MSG_MAGIC_NAME_70"])   # Quetzalli: BNW's Palidor
+        self.assertEqual(names.get("E0062_00_066_a_14"), ["MSG_ARMOR_NAME_82"])
+        self.assertEqual(names.get("E0062_01_067_a_47"), ["MSG_ARMOR_NAME_81"])
+        self.assertEqual(names.get("E0651_00_212_a_02"), ["MSG_MAGIC_NAME_70"])
+        self.assertEqual(names.get("E0963_00_192_a_01"), ["MSG_MAGIC_NAME_71"])   # Fenrir, as the swapped gift
+        self.assertNotIn("E0450_00_408_a_02", names)
         self.assertGreaterEqual(len(names.get("E0828_03_262_a_02", [])), 3)
         for k, keys in names.items():
             self.assertIn(k, self.pr, k)
             self.assertEqual(len(keys), self.pr[k].count("Obtained "), k)
+
+    def test_changed_reward_announcements(self):
+        import pr_script as S
+        import port_bnw_rewards as R
+        system = P.messages("system", "en")
+        path = os.path.join(MOD, "message", "Assets", "GameAssets", "Serial", "Data", "Message")
+        for line in open(os.path.join(path, "system_en.txt"), encoding="utf-8"):
+            if "\t" in line:
+                key, value = line.rstrip("\r\n").split("\t", 1)
+                system[key] = value
+        story = dict(line.rstrip("\r\n").split("\t", 1)
+                     for line in open(os.path.join(path, "story_mes_en.txt"), encoding="utf-8") if "\t" in line)
+        for key, value in R.story_lines(system).items():
+            self.assertEqual(story[key], value)
+        script = json.load(open(os.path.join(MOD, S.rel("sc_e_0879_1")), encoding="utf-8"))
+        self.assertFalse(any(op["mnemonic"] == "Msg" and op["operands"]["sValues"][0] == "E0879_00_483_a_01"
+                             for op in script["Mnemonics"]))
 
     def test_rage_descriptions(self):
         # BNW's Rage menu shows each rage's two attacks (ragedance_descriptions.asm): the rage

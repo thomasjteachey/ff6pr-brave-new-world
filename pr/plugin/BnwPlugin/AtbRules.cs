@@ -18,7 +18,7 @@ namespace BraveNewWorld.PR
     //  * nATB (c2.asm C2/1124 ORA $3A8F, C2/247A STZ $3A8F; c3.asm MagicFunction1/2; readme "nATB System"):
     //    time stops while an action's animation plays (the kit's SnesActionFreeze) and in the battle menus
     //    (Wait, always: BNW has no Active/Wait or Battle Speed rows), so the kit's BattleSettingsLock keeps battles
-    //    in Wait and hides those two Config rows, without writing the player's saved config (one config for every
+    //    in Wait and hides Battle Speed (and Battle Mode unless Battle Options offers Wait/Pause), without writing the player's saved config (one config for every
     //    mod installed). The battle speed isn't pinned (its reader is too small to detour safely, 2026-11-21): the
     //    saved value stays; the fill ignores it (SnesAtb) and the waits are timed through it (WaitGauge). Before 2026-11-21 NatbRules did a part of this, off by
     //    default, and read BattleActExection.nowState, which the game never writes (Battle Options 0.2.1's
@@ -29,6 +29,7 @@ namespace BraveNewWorld.PR
 
         public static void Apply(Harmony h)
         {
+            System.AppDomain.CurrentDomain.SetData("pr.bnw.natb", Natb);
             BnwAtb.UseBnwNumbers();
             SnesAtb.On = () => SpeedBalance;
             SnesAtb.Tag = SnesQuickfill.Tag = SnesActionFreeze.Tag = BattleSettingsLock.Tag = "[atb]";

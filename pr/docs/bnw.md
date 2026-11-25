@@ -4,13 +4,50 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
 
 ## Live progress (newest first)
 
+- 2026-11-25: BNW 0.26.7 released without a browser (coordinator): GitHub Latest (`gh release create`), and the
+  repository's new publish-nexus.yml uploads the release zip to Nexus draft 167 as its main file (the page stays
+  unpublished; the key is the repository's NEXUSMODS_API_KEY secret, copied sealed). In it: Banon's and the other
+  guests' join levels, the fixed-heal consumables (Dried Meat 100, Red Bull 200 HP + Float, Slim Jim 100 HP + Regen
+  + Haste), reward messages after BNW's event swaps, the Battle Mode row kept for Battle Options' next update
+  (not tried with the Deck's controller). Kit pin 32d767f. Gate: Rules.Tests 40/40, test_mod 54 OK, BNW Release +
+  WC Debug builds; laptop: the Vargas story test (20261125-124839, Deck Mt. Kolts save: Pummel ends the fight,
+  ScenarioFlag1 41) and `joinlv` (20261125-124355) PASS. The laptop's test-sandbox folder had gone: the first
+  Vargas run loaded the laptop's own save (Mog alone) and stopped after Sabin's join, an invalid run; the save was
+  sent again (remote_batch send_tar) before the rerun. Zip SHA-256
+  `6d25574145bec860dea573df353c42b433b3521af1b7cf9b605aa34ddf3511b9`, DLL md5 3965937b
+  (build/dist/archive/BraveNewWorld-PR-0.26.7.zip).
+
+- 2026-11-25: Banon's join level (the user: Banon dies on the Lete River raft to Fireball plus one hit). The guests
+  (statusId 15-30) took the PR's own first-join offsets, vanilla's; BNW's ROM gives Banon +2 (vanilla -3) and some
+  moogles and the second Ghost 0. The user's Banon joined at Lv 5 beside a Lv 8 party (82 HP; BNW: Lv 10, 170 HP).
+  Everything else on the raft matched the ROM (monster rows, formations, ATB rates, no monster cast times, Fireball
+  ~77-84 by BNW's formula, the Albatross script). `JoinRules.GuestFirstJoinOffset` + a one-time raise of a Banon
+  who already joined (average +2, at most +5; EsperStore flag bit 2). Rules.Tests 40/40, test_mod 54 OK (new
+  `test_join_offsets_from_bnw_rom`), BNW + WC Debug builds, harness `joinlv` PASS on the laptop
+  (build/test_logs/20261125-104529_joinlv@laptop.log: Banon 1 -> 27 at average 25; the repair 27 -> 32, once).
+  Installed on the PC and Deck (DLL bb5f00d0, with the dried-meat re-port); not released yet.
+
+- 2026-11-24: BNW 0.26.6 published on GitHub as Latest. Source `bdfd08a`, kit `892128a`.
+  The release build passed the Vargas story test through the Mt. Kolts completion flag.
+  ZIP SHA-256 `50e037ac9b1554eecb7b1f25c97b9ef2b6c96f6cf8e4beee64057c1ec57961b6`.
+  Nexus draft 167 has the verified ZIP as its main file, version 0.26.6 (file 620). The page remains unpublished.
+- 2026-11-24: BNW 0.26.6 installed on the Deck. Hits on a boss held at zero HP now reach its script through the
+  PR's final-attack handler. With a copy of the Deck's Mt. Kolts save, one Pummel after the tutorial triggered
+  Vargas's scripted defeat and returned the party to the field.
+- 2026-11-24: BNW 0.26.5 installed on the Deck for the Vargas stall. The 0.26.3 live log still showed repeated
+  errors in ViewMes. Older generated ExecMsg rows supplied one integer where Message.Msg reads two. The plugin
+  pads legacy rows in memory and the porter now writes padded rows. A test with a copied Mt. Kolts save and
+  messages enabled reached Sabin's solo phase, rendered Vargas's AI dialogue, and continued taking turns.
 - 2026-11-23 (BNW 0.25.0 session): **v0.26.3 released on GitHub (Latest) and on the Nexus draft (mod 167, private).**
   https://github.com/thomasjteachey/ff6pr-brave-new-world/releases/tag/v0.26.3
   - Vargas froze after Gale Cut (user, Deck): BattleAI.ViewMes threw ErrorFactorBase every frame after BattleEvent 07
     (the PR's Mash-joins scene holds the message window). Fix (kit SnesAiHostHooks.cs, another session's edit): after a
     PR-played battle event, the turn's remaining attack and battle lines are dropped. Laptop run 20261123-120754: lines
     dropped, battle ends, field runs on. Kit source not yet published (pin 6a1024c); the DLL carries it.
-  - Zip SHA-256 ecf2e4e6...0c5a; DLL md5 e4ae6dda = PC install (the Deck has 639d69f0: same code labelled 0.26.2; the game was running). The 11-22 "v0.26.2" release by another session was the renge-only attempt that didn't cure it.
+  - Zip SHA-256 ecf2e4e6...0c5a; DLL md5 e4ae6dda = PC install. On 2026-11-24 the user's new report
+    showed that the Deck still had 639d69f0, the old 0.26.2 DLL without this fix (not the same code under an old
+    label as first recorded). The Deck test copy completed the F7 07 handoff with message handling skipped.
+    The e4ae6dda DLL and its data were synced to the live Deck install, where the stall still occurred.
 - 2026-11-22 (BNW 0.25.0 session): **v0.26.1 released on GitHub (Latest) and on the Nexus draft (mod 167, private).**
   https://github.com/thomasjteachey/ff6pr-brave-new-world/releases/tag/v0.26.1
   - User-reported fixes (notes: boomerang-dual-wield.md): `<d7>` before boomerang names (ff6snes ICONS from 0xD7);

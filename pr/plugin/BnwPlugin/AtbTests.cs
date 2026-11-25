@@ -55,12 +55,12 @@ namespace BraveNewWorld.PR
                 if (tick == 0) return Begin();   // null: started, answered when the recording ends
                 return recording ? null : result ?? "atb: no result (the battle ended?)";
             }, $"atbtest: in a battle, BNW's ATB rules and {RecordSeconds:0} s of its battle clock recorded (party on auto); answers the result");
-            Harness.Register("configcheck", ConfigCheck, "configcheck [open]: the Config menu's rows with nATB's Active/Wait (1) and Battle " +
-                             "Speed (2) hidden, and whether the cursor is on a live row ('open': the field menu's Config first, as Battle Options' test does)");
+            Harness.Register("configcheck", ConfigCheck, "configcheck [open]: the Config menu's battle rows (Wait/Pause visible with Battle Options), " +
+                             "Battle Speed hidden, and whether the cursor is on a live row ('open': the field menu's Config first)");
         }
 
-        // nATB-only hides Config rows 1 and 2 (the kit's ConfigRows.Hide): out of the list the cursor walks, their objects
-        // inactive. "ok" = no hidden type left in any open Config page's list, their objects inactive, the selected row live.
+        // nATB hides Battle Speed, and Battle Mode too unless Battle Options owns its Wait/Pause row.
+        // "ok" = hidden rows absent and inactive, with the cursor on a live row.
         static string ConfigCheck(string[] args)
         {
             try
@@ -87,14 +87,15 @@ namespace BraveNewWorld.PR
                     for (int i = 0; i < list.Count; i++) types.Add(TypeOf(list[i]));
                     int sel = TypeOf(m.SelectedCommand);
                     bool selLive = m.SelectedCommand != null && m.SelectedCommand.gameObject.activeInHierarchy;
-                    bool hiddenLeft = AtbRules.Natb && (types.Contains(1) || types.Contains(2));
+                    bool hideMode = AtbRules.Natb && !BattleSettingsLock.BattleOptionsPresent();
+                    bool hiddenLeft = AtbRules.Natb && ((hideMode && types.Contains(1)) || types.Contains(2));
                     // the hidden rows' objects (out of the list, under the same parent): inactive
                     int liveHidden = 0;
                     var parent = list.Count > 0 ? list[0]?.transform.parent : null;
                     if (parent != null && AtbRules.Natb)
                         foreach (var r in parent.GetComponentsInChildren<Last.UI.KeyInput.ConfigCommandController>(true))
-                            if (r != null && (TypeOf(r) == 1 || TypeOf(r) == 2) && r.gameObject.activeSelf) liveHidden++;
-                    bool pageOk = !hiddenLeft && liveHidden == 0 && (m.SelectedCommand == null || (selLive && sel != 1 && sel != 2));
+                            if (r != null && ((hideMode && TypeOf(r) == 1) || TypeOf(r) == 2) && r.gameObject.activeSelf) liveHidden++;
+                    bool pageOk = !hiddenLeft && liveHidden == 0 && (m.SelectedCommand == null || (selLive && (!hideMode || sel != 1) && sel != 2));
                     ok &= pageOk;
                     lines.Add($"page '{m.name}': rows [{string.Join(" ", types)}], selected type {sel} (live {selLive}, index {m.SelectedContentIndex}), " +
                               $"hidden rows still active {liveHidden}{(pageOk ? "" : " WRONG")}");

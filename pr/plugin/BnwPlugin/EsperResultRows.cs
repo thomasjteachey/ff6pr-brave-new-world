@@ -29,8 +29,8 @@ namespace BraveNewWorld.PR
         public static void Apply(Harmony h)
         {
             Hooks.Patch(h, typeof(KeySkill), "SetJobProficiencyLevelUpList", typeof(EsperResultRows), postfix: nameof(Rows_Postfix));
-            Harness.Register("bnwel", SetUp, "bnwel: the party's esper users one EP short of their next EL, each with an esper " +
-                "(equipped from the owned ones if none), so the next won battle raises their EL (memory only; test runs never save)");
+            Harness.Register("bnwel", SetUp, "bnwel [bank <EL> <unspent EL> <SP>]: the party's esper users one EP short " +
+                "of their next EL, each with an esper; bank stages progress for screenshots (memory only; test runs never save)");
         }
 
         public static void Rows_Postfix(KeySkill __instance)
@@ -64,6 +64,13 @@ namespace BraveNewWorld.PR
         // harness: the party ready to gain an EL in the next battle
         static string SetUp(string[] a)
         {
+            bool bank = a.Length > 0;
+            int el = 0, unspent = 0, sp = 0;
+            if (bank && (a.Length != 4 || a[0] != "bank" ||
+                !int.TryParse(a[1], out el) || el < 1 || el > 24 ||
+                !int.TryParse(a[2], out unspent) || unspent < 1 || unspent > el ||
+                !int.TryParse(a[3], out sp) || sp < 1 || sp > 30))
+                return "error: bnwel bank <EL 1..24> <unspent EL 1..EL> <SP 1..30>";
             var D = EsperHooks.D;
             var udm = UserDataManager.Instance();
             if (D == null || udm == null) return "error: no save loaded";
@@ -98,11 +105,17 @@ namespace BraveNewWorld.PR
                 var esper = EsperHooks.EsperOf(FindOwned(udm, c.Id) ?? c);
                 if (esper == null) { done.Add($"{c.Name}: no esper"); continue; }
                 var p = EsperStore.Get(sid);
+                if (bank)
+                {
+                    p.El = el;
+                    p.ElBank = unspent;
+                    p.SpBank = sp;
+                }
                 int need = EsperRules.NextElAt(D, p.El);
                 if (need <= 0) { done.Add($"{c.Name}: EL max"); continue; }
                 p.Ep = need - 1;
                 EsperStore.Put(sid, p);
-                done.Add($"{c.Name}: EL {p.El}, EP {p.Ep} with {esper.Name}");
+                done.Add($"{c.Name}: EL {p.El}, EP {p.Ep}, unspent {p.ElBank}, SP {p.SpBank} with {esper.Name}");
             }
             EsperStore.Invalidate();
             return "bnwel: " + string.Join("; ", done);

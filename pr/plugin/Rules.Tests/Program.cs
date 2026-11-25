@@ -567,7 +567,23 @@ static class Program
         Eq(19, T(5, false, true, 30), "Edgar: 19");
         Eq(20, T(JoinRules.Setzer, false, true, 30), "Setzer: 20");
         Eq(18, T(7, false, true, 30), "Celes: 18");
-        Eq(-1, T(15, false, true, 30), "guests: the PR's own");
+        Eq(-1, T(15, false, true, 30), "guests' rejoins: the PR's own");
+        // guests' first joins: BNW's offsets (the PR's own table has vanilla's)
+        Eq(10, T(JoinRules.Banon, true, false, 8), "Banon: average + 2 (vanilla -3: the Lete River at Lv 5 beside a Lv 8 party)");
+        Eq(10, T(JoinRules.Banon, true, true, 8), "Banon: no World of Ruin floor");
+        Eq(13, T(16, true, false, 8), "Leo: average + 5, as vanilla");
+        Eq(8, T(18, true, false, 8), "the second Ghost: the average (vanilla -3)");
+        Eq(8, T(19, true, false, 8), "Kupek: the average (vanilla +2)");
+        Eq(8, T(29, true, false, 8), "Mog in the moogle defense: the average (vanilla +5)");
+        Eq(-1, T(31, true, false, 8), "past the SNES guests: the PR's own");
+        Eq(2, JoinRules.OffsetOf(JoinRules.Banon), "Banon's offset");
+        Eq(-3, JoinRules.VanillaOffsetOf(JoinRules.Banon), "Banon's vanilla offset");
+        // a Banon who joined under the PR's -3 (older builds): raised once to the average + 2, at most +5
+        Eq(10, JoinRules.BanonRepair(6, 8), "the user's save: Lv 6 beside an average of 8 -> 10");
+        Eq(11, JoinRules.BanonRepair(6, 20), "never more than 5 levels");
+        Eq(0, JoinRules.BanonRepair(10, 8), "already there: left alone");
+        Eq(0, JoinRules.BanonRepair(12, 8), "above it: left alone");
+        Eq(99, JoinRules.BanonRepair(97, 99), "never above 99");
     }
 
     static void ElementShareRule()

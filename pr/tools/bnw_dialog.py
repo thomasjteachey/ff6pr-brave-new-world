@@ -289,6 +289,18 @@ def obtained_names(pre):
             keys.append(next(iter(found)) if len(found) == 1 else "")
         if any(keys):
             out[k] = keys
+    # These scripts give a different reward in BNW. Resolve each obtained line through
+    # the content row actually awarded, including both swapped magicite locations.
+    import idmap
+    for key, kind, item in (("E0062_00_066_a_14", "item", 184),
+                            ("E0062_01_067_a_47", "item", 183),
+                            ("E0651_00_212_a_02", "esper", 0x3F),
+                            ("E0963_00_192_a_01", "esper", 0x4E)):
+        content = idmap.item_content(item) if kind == "item" else idmap.esper_content(item - 0x36)
+        out[key] = [P.Table("content")[content]["mes_id_name"]]
+    # The Sealed Gate gives four different items; its replacement narration already
+    # lists all four, so one-item name substitution would corrupt the line.
+    out.pop("E0450_00_408_a_02", None)
     return out
 
 

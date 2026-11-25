@@ -9,10 +9,13 @@ scene through its dialogue: event_translate.pairs), the vanilla gift it gives an
 the content ids come from idmap (BNW's item in SNES slot n is the PR's row for slot n after the port).
 An entry whose script no longer gives the vanilla gift fails the port (the PR or an earlier step moved it).
 The lines around a gift are bnw-text-ui's (BNW's text on the PR's keys); a box's item name tag is ours.
+The Sealed Gate's four gifts and the restored Odin need replacement narration; removed gifts suppress
+their old "Obtained" line.
 """
 import copy
 import json
 import os
+import re
 
 import idmap as M
 import port_chests as C
@@ -51,6 +54,22 @@ SWAPS = [
     ("sc_e_0886", ("esper", 0x41), []),
     ("sc_e_0890", ("esper", 0x42), [("esper", 0x41)]),
 ]
+
+
+def story_lines(messages):
+    """Reward narration for swaps that no longer fit one vanilla item name."""
+    contents = P.Table("content")
+    def name(kind, item):
+        key = contents[content(kind, item)]["mes_id_name"]
+        return re.sub(r"<[^>]*>", "", messages[key]).strip()
+    cave = next(gifts for script, _, gifts in SWAPS if script == "sc_e_0450")
+    scrolls = [name(kind, item) for kind, item in cave]
+    assert len(scrolls) == 4
+    return {
+        "E0450_00_408_a_02": (f"<CT>Obtained {scrolls[0]}, {scrolls[1]},\\n"
+                               f"<CT>{scrolls[2]} and {scrolls[3]}!"),
+        "E0890_00_519_a_04": f"<CT>Obtained {name('esper', 0x41)} magicite!",
+    }
 # vanilla's takings BNW dropped: (PR script, what the PR's RemoveItem takes)
 REMOVALS = [("sc_e_0890", ("esper", 0x41))]   # the Queen's statue: Odin stays
 
@@ -194,6 +213,14 @@ def port(out_dir, log, profile=None):
                         ms[n - 1] = Sc.op("Nop")
                 else:
                     new = [o for o in new]   # items keep the scene's own lines
+                    # A removed gift must not announce the vanilla item.
+                    if not gifts:
+                        prior = next((j for j in range(n - 1, max(-1, n - 4), -1)
+                                      if ms[j]["mnemonic"] == "Msg"), None)
+                        if prior is not None:
+                            key = ms[prior]["operands"]["sValues"][0]
+                            if "Obtained" in P.messages("story_mes", "en").get(key, ""):
+                                ms[prior] = Sc.op("Nop")
                     # a box's "Obtained X!" (Tag ITEM_N after the gift) names BNW's item
                     tag = n + 1 if n + 1 < len(ms) and ms[n + 1]["mnemonic"] == "Tag" else None
                     if tag is not None:
