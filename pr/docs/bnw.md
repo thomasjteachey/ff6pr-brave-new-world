@@ -4,6 +4,8 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
 
 ## Live progress (newest first)
 
+- 2026-11-25: BNW's Nexus page published (mod 167, the user: "go ahead and publish BNW"; Publish in the page editor,
+  GraphQL status `published`). Nexus marks it adult because of its Swearing/Profanity tag.
 - 2026-11-25: BNW 0.26.7 released without a browser (coordinator): GitHub Latest (`gh release create`), and the
   repository's new publish-nexus.yml uploads the release zip to Nexus draft 167 as its main file (the page stays
   unpublished; the key is the repository's NEXUSMODS_API_KEY secret, copied sealed). In it: Banon's and the other
