@@ -18,6 +18,8 @@ namespace BraveNewWorld.PR
             Harness.Register("exp", Exp, "exp: each party member's level, EXP and the EXP table's total for the next level");
             Harness.Register("bnwhurt", a => Hurt(), "bnwhurt: every party member to 1 HP and 0 MP (memory only), for heal checks (QA recovery points)");
             Harness.Register("bnwhp", a => Hp(), "bnwhp: each party member's HP and MP");
+            Harness.Register("bnwability", Ability, "bnwability <party index> +<id>|-<id>: add or remove an equipment ability "+
+                "(e.g. 253 Offering) on that member (memory only; a battle's fighter reads the same data)");
             Harness.Register("bnwnpcs", a => Npcs(), "bnwnpcs: the current map's NPCs: entity id, action (2 runs the script, 4 only " +
                 "talks), script id, message key (QA: Bob's cabin NPC must be action 2 with script 9963)");
             Harness.Register("bnwfocus", Focus, "bnwfocus <field entity id>: stage the party at an existing map entity for a background scene capture (memory only)");
@@ -82,6 +84,18 @@ namespace BraveNewWorld.PR
                 return $"npcs on map {map}: " + (parts.Count == 0 ? "none" : string.Join("; ", parts));
             }
             catch (System.Exception ex) { return "error: " + ex.Message; }
+        }
+
+        static string Ability(string[] a)
+        {
+            var ms = Members();
+            if (a.Length < 2 || !int.TryParse(a[0], out int i) || i < 0 || i >= ms.Count || a[1].Length < 2 ||
+                !int.TryParse(a[1].Substring(1), out int id)) return "error: bnwability <party index> +<id>|-<id>";
+            var list = ms[i].EquipmentAbilitys;
+            if (list == null) return "error: no equipment abilities";
+            if (a[1][0] == '+') { if (!list.Contains(id)) list.Add(id); }
+            else list.Remove(id);
+            return $"bnwability: {ms[i].Name} {(list.Contains(id) ? "has" : "lacks")} equipment ability {id}";
         }
 
         static string Hurt()
@@ -184,15 +198,17 @@ namespace BraveNewWorld.PR
 
         static string Give(string[] a)
         {
-            if (a.Length < 1 || !int.TryParse(a[0], out int item)) return "error: bnwgive <PR item id> [count]";
+            // "w<id>": a weapon (content type 2) instead of an item (type 1), e.g. a spare sword for the battle equip change
+            int type = a.Length > 0 && a[0].StartsWith("w") ? 2 : 1;
+            if (a.Length < 1 || !int.TryParse(type == 2 ? a[0].Substring(1) : a[0], out int item)) return "error: bnwgive <PR item id | w<weapon id>> [count]";
             int count = a.Length > 1 && int.TryParse(a[1], out int c) ? c : 1;
             var mm = MasterManager.Instance;
             if (mm == null) return "error: no master data";
             foreach (var ct in mm.GetList<Content>().Values)
-                if (ct != null && ct.TypeId == 1 && ct.TypeValue == item)
+                if (ct != null && ct.TypeId == type && ct.TypeValue == item)
                 {
                     new OwnedItemClient().AddOwnedItem(ct.Id, count);
-                    return $"bnwgive: item {item} (content {ct.Id}) x{count}";
+                    return $"bnwgive: {(type == 2 ? "weapon" : "item")} {item} (content {ct.Id}) x{count}";
                 }
             return $"error: no content for item {item}";
         }

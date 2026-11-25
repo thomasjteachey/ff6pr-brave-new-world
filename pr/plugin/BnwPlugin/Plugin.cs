@@ -16,7 +16,7 @@ namespace BraveNewWorld.PR
     public class Plugin : BasePlugin
     {
         public const string Guid = "ff6mod.bravenewworld";
-        public const string Version = "0.26.7";
+        public const string Version = "0.26.8";
         internal static ManualLogSource L;
 
         public override void Load()
@@ -194,6 +194,8 @@ namespace BraveNewWorld.PR
             BattleItems.Apply(harmony, hardItems.Value, damageRules.Value);   // v0.25.0: stars spread, Golem, MP-crit procs (Palidor: profile_bnw)
             AtbRules.Apply(harmony);   // Speed Balance, Quickfill, nATB (the kit's SnesAtb, SnesQuickfill, SnesActionFreeze, BattleSettingsLock)
             CommandRules.Apply(harmony);
+            HotswapRules.Enabled = turnRules.Value;
+            HotswapRules.Apply(harmony);   // Hotswap Delay: a weapon/shield swap in battle ends the turn as Defend (half turn)
             SpecialCommands.Enabled = commandLimits.Value;
             SpecialCommands.Apply(harmony);
             ShopCalls.Apply(harmony);   // the mod's added merchants (SysCall "BNW:shop <group>")
@@ -209,7 +211,10 @@ namespace BraveNewWorld.PR
             EngineRules.Apply(harmony, damageRules.Value, stealRules.Value, turnRules.Value);   // elemental share, Mug, Rage statuses + engine self-tests (after EsperHooks, CommandRules)
             EsperResultRows.Apply(harmony);   // "<name> gained an EL" on the victory screen
             HarnessItems.Register();   // harness: bnwgive <item> [n], exp
+            PrKit.Ff6.HarnessBattle.Register();   // harness: units, unithp, cond, act (battle probes)
             PartyEvents.Register();   // harness: bnwgear [strip <ids>] (audit C party events QA)
+            ReviveHealRules.Enabled = damageRules.Value;
+            ReviveHealRules.Apply(harmony);   // Kirin / Heal Force / Jackpot heal the living and revive the dead
             ExploderRule.Enabled = damageRules.Value;
             ExploderRule.Apply(harmony);   // a party member's Exploder: 250% of the user's current HP
             MindblowRule.Enabled = damageRules.Value;
