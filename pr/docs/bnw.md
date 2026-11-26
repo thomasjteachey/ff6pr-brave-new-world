@@ -4,6 +4,34 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
 
 ## Live progress (newest first)
 
+- 2026-11-26 01:00 (session "Fire scroll soft lock on Phantom Train"): **0.26.10: the Phantom Train Fire Scroll soft
+  lock, scripted gil gifts, recovery points** (the user's Deck: "i picked up the fire scroll in the phantom train and it
+  soft locked my game"). (1) The port numbered each added object (recovery points, BNW's save points, Leo's Spirits NPC,
+  the South Figaro wall) past its own file only; a room's entity_default and event layers share one entity numbering.
+  The caboose's recovery trigger (Map_30441_3) took entity 14, which is ev_e_1106's Tent sparkle; sc_e_1106's
+  delete_trigger puppets entity 14 and its ExecPuppet never ended. Five more rooms clashed (Map_20210 83, Map_30021_1
+  16, Map_30621_2 6, Map_30821_1 63 = the dream's Cyan #1, Map_30871_26 24). Now: the kit's
+  `pr_script.room_ids` (every layer file of the room); port_bnw_dream's ids moved to 70-76 with a clash assert;
+  test_mod `RoomIds.test_no_new_shared_entity_ids`. (2) SetGilTag's operand is a product group (a content-0 price row:
+  the inns' prices), not an amount: port_chests' and port_bnw_rewards' gil gifts wrote SetGilTag [1000] / [20000],
+  and the script stopped there, so the second rack (Fire Scroll + 1000 gil, sc_e_1107) and Owzer's basement box
+  (20000 gil, sc_e_0767_1) never gave their gil or set their flags (TreasureFlag2 11 / ScenarioFlag2 129). Now the
+  kit's `port_chests.gil_price_group` (vanilla's groups 204/206); test `test_gil_tags_name_price_groups`. (3) The
+  recovery-points session's heal on step + red sparkle (entry below). Gate (PC, build/batches/bnw-0.26.10-release-pc.json):
+  both racks and Owzer's box give everything and stay taken, Vargas story, joinlv, poison/sap probes PASS; the counter
+  probe failed twice after the poison probe's party wipe (the harness's New Game after a game over stalls on
+  "scene other"), and passed alone in a fresh launch (bnw-0.26.10-counter.json). Kit c52bd89.
+- 2026-11-26 00:35 (recovery-points session): **full-recovery save points: heal on step + red sparkle** (the user: "make them
+  red"; "i used that phantom train one and i'm pretty sure it didn't heal me"). The heal: the port's step-on trigger shares
+  its cell with the PR's save-point object, and QA's 11-21 check ran the script directly, never the step; the Phantom Train
+  trigger also had entity 14, the room's Tent sparkle (fixed in the porter by the Fire Scroll session: entity 15). Now
+  RecoveryPoints starts sc_bnw_recovery itself when the party steps onto a recovery cell (not on arriving in the map on it;
+  skipped while a script runs). The colour: the sparkle is an animated map object (FieldMapObjectAnimDefault) swapping
+  runtime sprites (Default_0n(Clone), rect 0x0) from the MO_FF6_B062 atlas, so the old tint never showed; each frame is now
+  replaced in LateUpdate by a copy cut by its UVs from a red/blue-swapped copy of the atlas (pink-red, white core, as BNW's
+  palette 5). Harness `bnwfx` dumps it. PASS build/batches/bnw-recovery-red.json (20261126-003258: healed from 1 HP twice by
+  walking; shot build/shots/bnw_recovery/recovery_red_359b.png). Ships with 0.26.10.
+
 - 2026-11-25 night (coordinator local_e699d13a): **the Giant's dying attack after a Poison/Sap death** (BNW readme: "Death by sap/poison/counter-attack no longer prevents the dying attack"; Bropedio's DeathCounterFix). Decompiled (tools/decomp/audit_counter, ai_vm): the PR files a final attack as (act, unit, calc result) in CounterModule.SetFinalAttack and ExecuteCounter hands it to the unit's controller, `ActSelectEnemyController.ActSelectFinalAttack(targets, users, hitType, ability, item)`, which raises `ActSelectEnemy.isReadyFinalAttack` for a unit that can't fight; BattleActExection.ForceSetFinalAttack reads the current act's function group (none on a tick: the NRE). `plugin/BnwPlugin/TickDeaths.cs` ([Battle] DamageRules): a monster a Poison (PoisonConditionFunction.UpdateSub / ActEndUpdateSub) or Sap (SlipConditionFunction.Update) tick takes to 0 HP gets that last step called directly (itself as the user, no ability), once per battle; the kit's AI host then runs its SNES death script in FinalAttackAct. Probes (build/batches/bnw-probes-2.py, PC): party 103's Giant poisoned at 30 HP: "tick death: ... final attack raised", "enemy AI death: monster 83 slot 0: attack bc (cmd 0c) => 325", the Giant uses 325 on the party (the battle goes on to its end); killed by a party counter-attack (the harness's interrupting act at 1 HP): the death script runs with no help (the PR raises final attacks for counter deaths: PR-native). Released as 0.26.9.
 
 - 2026-11-25 evening (coordinator local_78fe7a05): **BNW testing, no release** (no player-facing change). Story-fight gauntlet (`tools/story_bosses.py bnw --chunks 4`, now one request per fight so a stuck fight costs only itself; PC, current source): all 48 story fights start with their battle script; 43 end under the test kill; 5 go on into scripted endings the kill skips (474 and 440: Ultros flees; 453: a later phase brings in two monsters after the second kill; 421 and 472: the final tiers / the same three BC's gauntlet couldn't end). Cyan's dream (dream-1, laptop): plays end to end, the only miss is one sprite read as "on" not "shown" mid-script (11-21's same). Added scenes (bnw-scenes-1): all but sc_e_0966_3, which can't start by name (a mod-added script; T-Edition found the same: the field loads only scripts its entities name). **Research row settled: the Giant's dying attack by poison is MISSING** (build/batches/bnw-probes-2.py: party 103's Giant dies to a Poison tick, no "enemy AI death" line; BNW readme: "Death by sap/poison/counter-attack no longer prevents the dying attack"). Tried: forcing the PR's final attack on a tick death (BattleActExection.ForceSetFinalAttack) throws inside CounterModule.ForceSetFinalAttack (it wants the killing act's data): backed out (build/attic/TickDeaths.cs.txt); the fix needs the PR's FinalAttackAct path decompiled. The PC's BNW put back to the 0.26.8 release files after the test installs.

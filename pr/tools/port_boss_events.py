@@ -466,6 +466,7 @@ def port(out_dir, tables, log, profile, bnw=None):
         return {}
     scripts = tables.setdefault("script", P.Table("script"))
     changed = set()
+    prices = {}   # port_bnw_rewards' gil price groups (product, product_group)
     akeys, keys = C.asset_keys(), {}
     visits = None
     if getattr(profile, "bnw_dragon_visits", False):
@@ -481,7 +482,7 @@ def port(out_dir, tables, log, profile, bnw=None):
     kefka(out_dir, akeys, keys, log, getattr(profile, "bnw_event_lines", None) or [])
     if getattr(profile, "bnw_rewards", False):
         import port_bnw_rewards   # BNW's changed event gifts (the event audit's mechanics)
-        port_bnw_rewards.port(out_dir, log, profile)
+        prices = port_bnw_rewards.port(out_dir, log, profile, tables) or {}   # gil gifts' price groups
     if getattr(profile, "bnw_party_events", False):
         import port_bnw_party_events   # readme audit C: Shadow's lottery, Zozo unequip, Terra/Edgar optimize
         port_bnw_party_events.port(out_dir, log, profile)
@@ -503,4 +504,4 @@ def port(out_dir, tables, log, profile, bnw=None):
         os.makedirs(kdir, exist_ok=True)
         with open(os.path.join(kdir, "bnw_boss_events.json"), "w", encoding="utf-8") as fh:
             json.dump({"keys": list(kv), "values": list(kv.values())}, fh, indent=1)
-    return {"script": changed}
+    return {"script": changed, **prices}

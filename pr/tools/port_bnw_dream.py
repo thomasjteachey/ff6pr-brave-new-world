@@ -74,9 +74,10 @@ BIT_STOOGE1 = 0x188
 DX, DY = 2, 1
 CYAN1_AT, STOOGE1_AT, STOOGE1_TRIGGERS = (13, 49), (14, 49), ((13, 50), (14, 50))
 STOOGE3_AT = (26, 51)
-# new entity ids on map 520 (the PR's go up to 62)
-E_CYAN = (63, 64, 65)     # the three Cyan NPCs
-E_CYAN1_TOUCH, E_STOOGE1, E_STOOGE1_T = 66, 67, (68, 69)
+# new entity ids on map 520 (the PR's go up to 62; BNW's recovery point there takes 63: port_bnw_mechanics runs
+# first and numbers past the room's ids; 63 was Cyan #1's until 2026-11-25, and his fall's puppet could hang)
+E_CYAN = (70, 71, 72)     # the three Cyan NPCs
+E_CYAN1_TOUCH, E_STOOGE1, E_STOOGE1_T = 73, 74, (75, 76)
 E_TOUCH = (E_CYAN1_TOUCH, 55, 51)   # each Cyan's touch object (#2/#3: the companions' own)
 OBJ = 100                 # new Tiled object ids from 101 (map 520's files use up to 77)
 
@@ -456,6 +457,13 @@ def port(out_dir, log=print, tables=None):
             objs.append(_cyan_npc(boy, OBJ + 5 + n, E_CYAN[n], at))
         _write(out_dir, GROUP, FOLDER, WEST, name, doc)
         _key(akeys, keys, GROUP, FOLDER, WEST, name)
+    # no other object in the room (vanilla's, the recovery point's) may have our entity ids: a puppet on a shared
+    # id can hang the scene (pr_script.room_ids)
+    ours = set(E_CYAN) | {E_CYAN1_TOUCH, E_STOOGE1, *E_STOOGE1_T}
+    clash = [(f, o.get("name"), S.entity_id(o)) for f, o in S.room_objects(out_dir, vdir)
+             if S.entity_id(o) in ours and o.get("name") != "BNW カイエン（心のかけら）"
+             and f not in ("ev_bnw_dream_stooge1.json", "ev_bnw_dream_cyan1.json")]
+    assert not clash, f"map 520: the dream's entity ids are taken: {clash}"
     # Stooge #3's boy where BNW stands him (SNES 26,51; vanilla 28,52, now Cyan #3's neighbour)
     doc = _load(out_dir, os.path.join(vdir, "ev_e_0898.json"))
     b = next(o for o in doc["layers"][0]["objects"] if _obj_props(o)["object_type"]["value"] == 6)

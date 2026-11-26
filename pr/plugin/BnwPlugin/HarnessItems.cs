@@ -18,6 +18,7 @@ namespace BraveNewWorld.PR
             Harness.Register("exp", Exp, "exp: each party member's level, EXP and the EXP table's total for the next level");
             Harness.Register("bnwhurt", a => Hurt(), "bnwhurt: every party member to 1 HP and 0 MP (memory only), for heal checks (QA recovery points)");
             Harness.Register("bnwhp", a => Hp(), "bnwhp: each party member's HP and MP");
+            RecoveryPoints.RegisterHarness();
             Harness.Register("bnwability", Ability, "bnwability <party index> +<id>|-<id>: add or remove an equipment ability "+
                 "(e.g. 253 Offering) on that member (memory only; a battle's fighter reads the same data)");
             Harness.Register("bnwnpcs", a => Npcs(), "bnwnpcs: the current map's NPCs: entity id, action (2 runs the script, 4 only " +

@@ -825,6 +825,48 @@ def diff_paths(a, b, path=""):
     return set() if a == b else {path}
 
 
+class RoomIds(unittest.TestCase):
+    def test_no_new_shared_entity_ids(self):
+        """A room's object files (entity_default and its event layers) share one entity numbering: an object the mod
+        adds must not take an id another object in the room already has (vanilla repeats one only for versions of
+        one object, and 0 = none). BNW's Phantom Train recovery point took the Tent sparkle's 14 and the rack's
+        pick-up hung (2026-11-25; pr_script.room_ids)."""
+        import pr_script as S
+        rooms = {os.path.relpath(os.path.dirname(f), MOD)
+                 for f in glob.glob(os.path.join(MOD, "map_*", "**", "*.json"), recursive=True)
+                 if not os.path.basename(f).startswith("sc_") and os.path.basename(f) != "package.json"}
+        bad = []
+        for room in sorted(rooms):
+            def counts(root):
+                c = Counter(S.entity_id(o) for _, o in S.room_objects(root, room) if S.entity_id(o))
+                return c
+            have, van = counts(MOD), counts(os.path.join(MOD, "__none__"))   # the mod over vanilla; vanilla alone
+            bad += [(room, e, n) for e, n in have.items() if n > max(1, van.get(e, 0))]
+        self.assertEqual(bad, [], "rooms where the mod gave two objects one entity_id")
+
+    def test_gil_tags_name_price_groups(self):
+        """SetGilTag's operand is a product group whose one content-0 row is the price ("Obtained (NUM) gil!"),
+        not an amount: SetGilTag [1000] stopped the Phantom Train rack's pick-up before its gil and flag
+        (2026-11-26; port_chests.gil_price_group)."""
+        product = {}
+        for path in (os.path.join(P.VANILLA, "master", "Assets", "GameAssets", "Serial", "Data", "Master", "product.csv"),
+                     os.path.join(MOD_MASTER, "product.csv")):
+            if os.path.exists(path):
+                _, rows = read_csv(path)
+                product.update({r[0]: r for r in rows})
+        prices = defaultdict(list)
+        for r in product.values():
+            prices[int(r[2])].append(r)
+        bad = []
+        for f in glob.glob(os.path.join(MOD, "map_*", "**", "sc_*.json"), recursive=True):
+            for m in json.load(open(f, encoding="utf-8"))["Mnemonics"]:
+                if m["mnemonic"] == "SetGilTag":
+                    g = m["operands"]["iValues"][0]
+                    if not any(int(r[1]) == 0 for r in prices.get(g, [])):
+                        bad.append((os.path.basename(f), g))
+        self.assertEqual(bad, [], "SetGilTag on a group with no price row")
+
+
 class UndeadInBattle(unittest.TestCase):
     """A monster is undead in battle by the Undead flag (2) in its monster_flag_group
     (EnemyCharacterParameter's constructor: tools/decomp/undead); the species bit 0 only feeds the

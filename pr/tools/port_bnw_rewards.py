@@ -182,15 +182,20 @@ def content(kind, x):
     raise ValueError(kind)
 
 
-def _gift_ops(kind, x, contents):
-    """BNW's gift: an item / esper (GetItem), gil (its tag, the PR's own "gil" line, GetItem 1)."""
+def _gift_ops(kind, x, contents, tables=None, changed=None):
+    """BNW's gift: an item / esper (GetItem), gil (its tag, the PR's own "gil" line, GetItem 1). SetGilTag takes a
+    product group, not the amount (port_chests.gil_price_group): SetGilTag [20000] had stopped the script there."""
     if kind == "gil":
-        return [Sc.op("SetGilTag", i=[x]), Sc.op("Msg", s=[C.MSG_GIL]), Sc.op("GetItem", i=[GIL, x])]
+        assert tables is not None, "a gil gift needs the porter's tables (its SetGilTag price group)"
+        return [Sc.op("SetGilTag", i=[C.gil_price_group(tables, x, changed if changed is not None else {})]),
+                Sc.op("Msg", s=[C.MSG_GIL]), Sc.op("GetItem", i=[GIL, x])]
     return [Sc.op("GetItem", i=[content(kind, x), 1])]
 
 
-def port(out_dir, log, profile=None):
+def port(out_dir, log, profile=None, tables=None):
+    """-> {table: ids} the gifts add (gil price groups: product, product_group)."""
     contents = P.Table("content")
+    prices = {}
     akeys, keys = C.asset_keys(), {}
     done = 0
     for name, (vk, vx), gifts in SWAPS:
@@ -206,7 +211,7 @@ def port(out_dir, log, profile=None):
             for n in at:
                 new = []
                 for kind, x in gifts:
-                    new += _gift_ops(kind, x, contents)
+                    new += _gift_ops(kind, x, contents, tables, prices)
                 if vk == "gil":
                     # the PR's own fixed line ("293 GP") right before it: the gil line names BNW's amount
                     if n > 0 and ms[n - 1]["mnemonic"] == "Msg":
@@ -263,4 +268,4 @@ def port(out_dir, log, profile=None):
         with open(os.path.join(kdir, "bnw_rewards.json"), "w", encoding="utf-8") as fh:
             json.dump({"keys": list(kv), "values": list(kv.values())}, fh, indent=1)
     log(f"  event rewards: {done} PR scripts give BNW's gifts ({len(SWAPS)} changes)")
-    return {}
+    return prices

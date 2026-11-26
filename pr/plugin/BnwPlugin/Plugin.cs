@@ -16,7 +16,7 @@ namespace BraveNewWorld.PR
     public class Plugin : BasePlugin
     {
         public const string Guid = "ff6mod.bravenewworld";
-        public const string Version = "0.26.9";
+        public const string Version = "0.26.10";
         internal static ManualLogSource L;
 
         public override void Load()
@@ -257,6 +257,9 @@ namespace BraveNewWorld.PR
             return $"[veldt] {table.Length} groups, {entries} formations, first party {first}";
         }
 
+        // after the field's sprite animations: the recovery save points' sparkle frames swapped for their red copies
+        void LateUpdate() => RecoveryPoints.LateUpdate();
+
         void Update()
         {
             if (++frame % 30 == 0) EsperStore.Invalidate();
@@ -271,7 +274,7 @@ namespace BraveNewWorld.PR
             TestKitHotkey.Update();
             FormulaProbe.BattleChainDone = tossChecked;   // the chain below ends with toss; new checks: FormulaProbe.AddSelfTest
             BnwEnemyAi.Update();
-            RecoveryPoints.Update();   // BNW's full-recovery save points tinted (their heal is the port's trigger)
+            RecoveryPoints.Update();   // BNW's full-recovery save points: red sparkle; the heal on stepping onto one
             DialogText.Update();
             FormulaProbe.Update();
             if (verified && !veldtChecked && frame % 60 == 0)

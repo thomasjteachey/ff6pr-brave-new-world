@@ -235,14 +235,14 @@ def spirits_trade(out_dir, akeys, keys, log, alloc):
     ent = _load(out_dir, f)
     upper = next(lay for lay in ent["layers"] if lay.get("name") == "UpperObject")
     if not any(o.get("name") == "BNW Leo's Spirits" for o in upper["objects"]):
-        objs = [o for lay in ent["layers"] for o in lay.get("objects") or []]
+        oid, eid = S.room_ids(out_dir, os.path.dirname(f), [ent])   # the room's event layers too
         npc = copy.deepcopy(man)
-        npc["id"] = 1 + max(o["id"] for o in objs)
+        npc["id"] = 1 + oid
         npc["name"] = "BNW Leo's Spirits"
         npc["x"], npc["y"] = 16 * SPIRITS_AT[0], 16 * (SPIRITS_AT[1] + 1)
         pr = _props(npc)
         pr["script_id"]["value"] = SID_SPIRITS
-        pr["entity_id"]["value"] = 1 + max([_props(o).get("entity_id", {}).get("value", 0) for o in objs] + [0])
+        pr["entity_id"]["value"] = 1 + eid
         upper["objects"].append(npc)
     _save(ent, out_dir, f)
     _key(akeys, keys, f)
@@ -515,7 +515,9 @@ def south_figaro_wall(out_dir, akeys, keys, log):
     grave = next(o for lay in json.load(open(_vpath(*GRAVE, "entity_default.json"), encoding="utf-8"))["layers"]
                  for o in lay.get("objects") or [] if _props(o).get("message_key", {}).get("value") == GRAVE_LINE)
     wall = copy.deepcopy(grave)
-    wall.update(id=1, name="BNW wall (the basement stairs, until the Lete River)", x=16 * WALL_AT[0], y=16 * (WALL_AT[1] + 1))
+    # a Tiled id past the room's others (it was 1, the room's GotoMap's; pr_script.room_ids)
+    oid = 1 + S.room_ids(out_dir, os.path.dirname(_vpath(group, folder, sub, "entity_default.json")), skip=["ev_bnw_sf_wall.json"])[0]
+    wall.update(id=oid, name="BNW wall (the basement stairs, until the Lete River)", x=16 * WALL_AT[0], y=16 * (WALL_AT[1] + 1))
     pr = _props(wall)
     for k, v in (("action_id", 0), ("message_key", ""), ("entity_id", WALL_ENTITY), ("accept_action_direction", 0),
                  ("interactive_icon_type", 0), ("collision", True), ("asset_id", 0)):

@@ -70,8 +70,9 @@ def save_points(out_dir, log, akeys, keys):
         objs = [o for l in _layers(doc["layers"]) for o in l.get("objects") or []]
         if any(o.get("name") == "SavePoint" and o["x"] == 16 * px and o["y"] == 16 * (py + 1) for o in objs):
             continue   # already there (a re-run on the port's own copy)
-        nid = 1 + max([o["id"] for o in objs] or [0])
-        ent = 1 + max([p["value"] for o in objs for p in o.get("properties", []) if p["name"] == "entity_id"] or [0])
+        # past every id the room's files use (its event layers' too: pr_script.room_ids)
+        import pr_script as Sc
+        nid, ent = (1 + n for n in Sc.room_ids(out_dir, os.path.dirname(rel), [doc]))
         a, s = copy.deepcopy(action), copy.deepcopy(sparkle)
         a["id"], s["id"] = nid, nid + 1
         a["x"] = s["x"] = 16 * px
@@ -203,10 +204,12 @@ def recovery_points(out_dir, log, akeys, keys, tables, rom):
                            if {q["name"]: q["value"] for q in o.get("properties", [])}.get("object_type") == 9
                            and o["x"] == 16 * px and o["y"] == 16 * (py + 1))
                 n = copy.deepcopy(trig)
-                n["id"] = 1 + max([o["id"] for o in objs] or [0])
+                # past every id the room's files use: its event layers share both numberings (the Phantom Train's
+                # caboose: entity 14 was also ev_e_1106's Tent sparkle, and its pick-up hung; pr_script.room_ids)
+                oid, ent = (1 + v for v in Sc.room_ids(out_dir, os.path.dirname(rel), [doc]))
+                n["id"] = oid
                 n["name"] = "BNW Recovery"
                 n["x"], n["y"] = 16 * px, 16 * (py + 1)
-                ent = 1 + max([q["value"] for o in objs for q in o.get("properties", []) if q["name"] == "entity_id"] or [0])
                 for q in n["properties"]:
                     if q["name"] == "entity_id":
                         q["value"] = ent
