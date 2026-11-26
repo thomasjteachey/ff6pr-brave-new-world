@@ -16,7 +16,7 @@ namespace BraveNewWorld.PR
     public class Plugin : BasePlugin
     {
         public const string Guid = "ff6mod.bravenewworld";
-        public const string Version = "0.26.8";
+        public const string Version = "0.26.9";
         internal static ManualLogSource L;
 
         public override void Load()
@@ -215,6 +215,8 @@ namespace BraveNewWorld.PR
             PartyEvents.Register();   // harness: bnwgear [strip <ids>] (audit C party events QA)
             ReviveHealRules.Enabled = damageRules.Value;
             ReviveHealRules.Apply(harmony);   // Kirin / Heal Force / Jackpot heal the living and revive the dead
+            TickDeaths.Enabled = damageRules.Value;
+            TickDeaths.Apply(harmony);   // a Poison/Sap death still runs a monster's death script (BNW's DeathCounterFix)
             ExploderRule.Enabled = damageRules.Value;
             ExploderRule.Apply(harmony);   // a party member's Exploder: 250% of the user's current HP
             MindblowRule.Enabled = damageRules.Value;
@@ -261,7 +263,7 @@ namespace BraveNewWorld.PR
             if (frame % 120 == 0) EsperHooks.UnequipDisallowed();   // old saves: espers BNW forbids that character
             if (frame % 60 == 30) Schematics.Sync();   // Figaro's World of Ruin soldier as Julian; Auto Crossbow's numbers
             if (frame % 120 == 90) JoinLevels.Sync();   // older saves: a Banon who joined at the PR's -3 raised once
-            if (frame % 10 == 0) { BattleRewards.Track(); WaitGauge.Track(); StatusTicks.Track(); }
+            if (frame % 10 == 0) { BattleRewards.Track(); WaitGauge.Track(); StatusTicks.Track(); TickDeaths.Track(); }
             if (frame % 300 == 200) MenuRules.Track();   // one-time log self-test (Umaro's menu)
             if (frame % 10 == 5) BnwMonsterImages.Track();   // the final battle tower: a statue part that dies leaves the picture
             BattleFormulas.Track();  // Shock's cost to its user, after its hits

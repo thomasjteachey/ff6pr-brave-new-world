@@ -1222,6 +1222,7 @@ class Dialogue(unittest.TestCase):
             self.assertIn(k, self.pr, k)
             self.assertEqual(len(keys), self.pr[k].count("Obtained "), k)
 
+    @unittest.skipUnless(MOD_NAME == "BraveNewWorld", "BNW's changed event rewards (port_bnw_rewards)")
     def test_changed_reward_announcements(self):
         import pr_script as S
         import port_bnw_rewards as R

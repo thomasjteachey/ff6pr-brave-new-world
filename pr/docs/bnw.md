@@ -4,6 +4,37 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
 
 ## Live progress (newest first)
 
+- 2026-11-25 night (coordinator local_e699d13a): **the Giant's dying attack after a Poison/Sap death** (BNW readme: "Death by sap/poison/counter-attack no longer prevents the dying attack"; Bropedio's DeathCounterFix). Decompiled (tools/decomp/audit_counter, ai_vm): the PR files a final attack as (act, unit, calc result) in CounterModule.SetFinalAttack and ExecuteCounter hands it to the unit's controller, `ActSelectEnemyController.ActSelectFinalAttack(targets, users, hitType, ability, item)`, which raises `ActSelectEnemy.isReadyFinalAttack` for a unit that can't fight; BattleActExection.ForceSetFinalAttack reads the current act's function group (none on a tick: the NRE). `plugin/BnwPlugin/TickDeaths.cs` ([Battle] DamageRules): a monster a Poison (PoisonConditionFunction.UpdateSub / ActEndUpdateSub) or Sap (SlipConditionFunction.Update) tick takes to 0 HP gets that last step called directly (itself as the user, no ability), once per battle; the kit's AI host then runs its SNES death script in FinalAttackAct. Probes (build/batches/bnw-probes-2.py, PC): party 103's Giant poisoned at 30 HP: "tick death: ... final attack raised", "enemy AI death: monster 83 slot 0: attack bc (cmd 0c) => 325", the Giant uses 325 on the party (the battle goes on to its end); killed by a party counter-attack (the harness's interrupting act at 1 HP): the death script runs with no help (the PR raises final attacks for counter deaths: PR-native). Released as 0.26.9.
+
+- 2026-11-25 evening (coordinator local_78fe7a05): **BNW testing, no release** (no player-facing change). Story-fight gauntlet (`tools/story_bosses.py bnw --chunks 4`, now one request per fight so a stuck fight costs only itself; PC, current source): all 48 story fights start with their battle script; 43 end under the test kill; 5 go on into scripted endings the kill skips (474 and 440: Ultros flees; 453: a later phase brings in two monsters after the second kill; 421 and 472: the final tiers / the same three BC's gauntlet couldn't end). Cyan's dream (dream-1, laptop): plays end to end, the only miss is one sprite read as "on" not "shown" mid-script (11-21's same). Added scenes (bnw-scenes-1): all but sc_e_0966_3, which can't start by name (a mod-added script; T-Edition found the same: the field loads only scripts its entities name). **Research row settled: the Giant's dying attack by poison is MISSING** (build/batches/bnw-probes-2.py: party 103's Giant dies to a Poison tick, no "enemy AI death" line; BNW readme: "Death by sap/poison/counter-attack no longer prevents the dying attack"). Tried: forcing the PR's final attack on a tick death (BattleActExection.ForceSetFinalAttack) throws inside CounterModule.ForceSetFinalAttack (it wants the killing act's data): backed out (build/attic/TickDeaths.cs.txt); the fix needs the PR's FinalAttackAct path decompiled. The PC's BNW put back to the 0.26.8 release files after the test installs.
+
+- 2026-11-25 (coordinator local_0061ea23): **BNW 0.26.8 released** (GitHub Latest, BNW repo 71c0567, kit 2d0b853; Nexus 167
+  file 625 main + primary, mod version 0.26.8; zip SHA-256 8bde13ad...f6aab794, DLL 7afff583 on the PC and the Deck).
+  - Hotswap Delay (readme 803-806; c1.asm QueueSwap, c2.asm SwapOrDefend): `HotswapRules.cs`. The PR's KeyInput
+    BattleInfomationController applies a battle equip change at once (decompiled tools/decomp/hotswap, hotswap2, hotswap3:
+    <>c__DisplayClass82_0.<EquipChangeInit>b__2 = SetEquip, onEquipChange, back to state 7). EquipChangeInit's prefix notes the
+    hands, EquipSelectInit's postfix sees a changed hand, and the next UpdateController finishes the command as Defend
+    (CommandDone: [the player], command 2's AbilityId, target type 6); the act's Defend status is lifted when it ends.
+    In game (build/batches/bnw-hotswap.json, harness `bnwswap` from the Item list): Celes 13 -> 15, menu closed, "half turn
+    after Defend: gauge 49.2 of 100", "swap act done: Celes not defending". Forcing state 7 from the command list throws in
+    the game's EquipSelectInit: the harness opens it from the Item list only.
+  - Revive And Heal (readme 2076-2078): `ReviveHealRules.cs`. Probes (build/batches/bnw-probes.json; the kit's new
+    `PrKit/Ff6/HarnessBattle.cs`: units, unithp, cond, act) showed the PR like vanilla: Heal Force aimed at a KO'd Terra went to
+    Locke, Jackpot (216) revived but didn't heal. Now the act's largest HP gain goes to every ally it missed (KO'd: revived
+    with it). In game: Kirin revived Edgar with 132 (the PR healed Locke), Jackpot healed Locke to 162 (the PR revived Edgar),
+    Heal Force revived Edgar. A detour on BattleActExection.EndFinishingState froze battles in their opening: the act's end
+    is seen from BattleProgressATBFF6.Update instead (counters and interrupts skip ActExectionEndDelegate).
+  - Settled as PR-native: X-Fight strike 2 re-targets after a kill (Offering on, e0 at 1 HP: e0 died, the Tek Armor took the
+    second strike); +25% magic relics on heals (CalcExecuteFF6.RecoveryExection is MagicExecution, which reads
+    GetEquipAccessoryNum: tools/decomp/battle); curative acts re-target a KO'd pick to a living ally.
+  - Still open (minor research rows): Palidor's riders landing together / keeping ATB / Hide, the Giant's dying attack by
+    poison, SOS relics resetting on death, equip-cure, Colosseum wagers kept on a loss, nulled/absorbed elements setting
+    statuses, Mute vs Aqualung, Auto-Swordless and Non-Elemental Runic, Throw details, Bserk with defense-ignoring weapons,
+    Demi on bosses, Vanish/Clear, party counter-of-counter, Rage learning off the Veldt. The full list with evidence:
+    side-session-notes .../local_7324b381.../bnw-open-items.md.
+  - Gate: Rules.Tests 40/40, test_mod 54 OK, BNW Release + WC/BC/TED/Battle Options Debug builds (kit edit), PC: bnw-hotswap
+    and bnw-probes PASS; laptop: Vargas story (after resending the vanished test-sandbox) and joinlv PASS.
+
 - 2026-11-25: BNW's Nexus page published (mod 167, the user: "go ahead and publish BNW"; Publish in the page editor,
   GraphQL status `published`). Nexus marks it adult because of its Swearing/Profanity tag.
 - 2026-11-25: BNW 0.26.7 released without a browser (coordinator): GitHub Latest (`gh release create`), and the
