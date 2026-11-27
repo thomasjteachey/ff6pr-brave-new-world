@@ -44,6 +44,7 @@ namespace BraveNewWorld.PR
 
         public static bool CorrectLevel_Prefix(int characterStatusId, bool isFirstTimeJoin)
         {
+            GauRages.CorrectLevel(characterStatusId, isFirstTimeJoin);   // BNW's start rages after this JoinCharacter
             if (!Enabled) return true;
             try
             {

@@ -4,6 +4,17 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
 
 ## Live progress (newest first)
 
+- 2026-11-27: **Gau's start rages** (the user: "i started with 9 was i supposed to?" and a mix of "2/3" and "75%"
+  in the Rage text). No: BNW's initial rage bits (C4/7AA0) hold Soldier alone; the PR's JoinCharacter gave vanilla's
+  9 (Brawler, Whisper, Were-Rat, Rhinotaur, Lobo, Hornet, Trilobiter, Exocite, M-TekArmor). Rhinotaur, Lobo and
+  Trilobiter aren't among BNW's 64 rages, so they had no BNW text and showed the porter's fallback
+  ("75%: ...; 25%: Attack", port_dances.describe_rages from the PR's rates); every BNW rage reads "2/3: ...; 1/3: ...".
+  `BnwPlugin/GauRages.cs`: a first join (CorrectLevel's isFirstTimeJoin) leaves Soldier alone; on the field any rage
+  outside BNW's 64 is un-learned and an older save's Gau gets Soldier once (EsperStore flag bit 4; the 6 BNW rages
+  of vanilla's set stay, a Leap could have taught them). Harness `gaurages` PASS on the laptop
+  (build/test_logs/20261127-145653_gaurages@laptop.log). **0.26.13** (DLL md5 261667b4): Rules.Tests 40/40, test_mod
+  57 OK, laptop gate build/batches/bnw-0.26.13-release.json (gaurages + joinlv) PASS.
+
 - 2026-11-27 (session "suplex train"): **0.26.12: BNW's battle talk** (the user: "aren't you suppoed to get a stupid
   line when you suplex the train in bnw snes?"). BNW rewrote four battle events (asm/banks/d0.asm; new kit
   `tools/snes_battle_events.py` reads D0/9800 in both ROMs): 08 Wrexsoul (dialogue 251), 0B Kaiser (212-214), 13
