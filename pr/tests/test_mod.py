@@ -857,14 +857,27 @@ class RoomIds(unittest.TestCase):
         prices = defaultdict(list)
         for r in product.values():
             prices[int(r[2])].append(r)
-        bad = []
+        bad, raw = [], []
+        texts = {}
+        for path in (os.path.join(P.VANILLA, "message", "Assets", "GameAssets", "Serial", "Data", "Message", "system_en.txt"),
+                     os.path.join(P.VANILLA, "message", "Assets", "GameAssets", "Serial", "Data", "Message", "story_mes_en.txt"),
+                     MOD_MESSAGE, MOD_MESSAGE.replace("system_en", "story_mes_en")):
+            if os.path.exists(path):
+                texts.update(l.rstrip("\r\n").split("\t", 1) for l in open(path, encoding="utf-8") if "\t" in l)
         for f in glob.glob(os.path.join(MOD, "map_*", "**", "sc_*.json"), recursive=True):
-            for m in json.load(open(f, encoding="utf-8"))["Mnemonics"]:
+            ms = json.load(open(f, encoding="utf-8"))["Mnemonics"]
+            for i, m in enumerate(ms):
                 if m["mnemonic"] == "SetGilTag":
                     g = m["operands"]["iValues"][0]
                     if not any(int(r[1]) == 0 for r in prices.get(g, [])):
                         bad.append((os.path.basename(f), g))
+                    # SetGilTag fills (KINGAKU), not the chests' (NUM): "Obtained (NUM) gil!" showed raw (2026-11-27)
+                    line = next((n for n in ms[i + 1:] if n["mnemonic"] in ("Msg", "MsgYesNo", "Select")), None)
+                    key = line["operands"]["sValues"][0] if line else ""
+                    if "(NUM)" in texts.get(key, "") and "(KINGAKU)" not in texts.get(key, ""):
+                        raw.append((os.path.basename(f), key))
         self.assertEqual(bad, [], "SetGilTag on a group with no price row")
+        self.assertEqual(raw, [], "a gil line after SetGilTag that says (NUM), which SetGilTag doesn't fill")
 
 
 class UndeadInBattle(unittest.TestCase):

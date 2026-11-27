@@ -188,7 +188,7 @@ def _gift_ops(kind, x, contents, tables=None, changed=None):
     if kind == "gil":
         assert tables is not None, "a gil gift needs the porter's tables (its SetGilTag price group)"
         return [Sc.op("SetGilTag", i=[C.gil_price_group(tables, x, changed if changed is not None else {})]),
-                Sc.op("Msg", s=[C.MSG_GIL]), Sc.op("GetItem", i=[GIL, x])]
+                Sc.op("Msg", s=[C.MSG_GIL_GIFT]), Sc.op("GetItem", i=[GIL, x])]
     return [Sc.op("GetItem", i=[content(kind, x), 1])]
 
 
