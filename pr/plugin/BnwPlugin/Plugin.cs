@@ -16,7 +16,7 @@ namespace BraveNewWorld.PR
     public class Plugin : BasePlugin
     {
         public const string Guid = "ff6mod.bravenewworld";
-        public const string Version = "0.26.13";
+        public const string Version = "0.26.14";
         internal static ManualLogSource L;
 
         public override void Load()
@@ -225,6 +225,10 @@ namespace BraveNewWorld.PR
             Schematics.Enabled = hardItems.Value;
             Schematics.Apply(harmony);   // Julian's Schematics in Figaro (World of Ruin): Auto Crossbow 225, never misses
             JoinLevels.Apply(harmony);   // BNW's join levels: no averaging on rejoins, World of Ruin floors, first-join offsets
+            GauRages.Reset = Config.Bind("Gau", "ForgetVanillaStartRages", false,
+                "One time: Gau forgets the 9 starting Rages the port gave him before 0.26.13 (Brawler, Whisper, Were-Rat, " +
+                "Rhinotaur, Lobo, Hornet, Trilobiter, Exocite, M-TekArmor) and learns BNW's Soldier, the next time you're " +
+                "on the field; then it turns itself off. Rages he learned another way stay. Save afterwards.");
             GauRages.Apply(harmony);     // Gau's start rages: BNW's Soldier, not the PR's vanilla 9; none of the rages BNW cut
             FormulaProbe.Init(harmony);  // only when BepInEx/bnw_probe.request exists
             AddComponent<BnwRunner>();

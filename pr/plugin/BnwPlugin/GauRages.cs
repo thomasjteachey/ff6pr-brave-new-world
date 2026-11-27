@@ -34,6 +34,10 @@ namespace BraveNewWorld.PR
         const int FlagStartRages = 4;   // EsperStore.Flags (Schematics 1, JoinLevels' Banon 2): Soldier taught to an older save's Gau
         internal static string LastFix = "";   // tests
         static bool firstJoin;
+        // Config Gau.ForgetVanillaStartRages: a player whose Gau joined before 0.26.13 (the PR's 9) and who knows none of
+        // the six BNW ones came from a Leap drops them all, once (Sync), and the switch turns itself off
+        internal static BepInEx.Configuration.ConfigEntry<bool> Reset;
+        internal static readonly int[] Vanilla = { 811, 814, 819, 821, 825, 846, 854, 857, 866 };
 
         public static void Apply(Harmony h)
         {
@@ -57,7 +61,7 @@ namespace BraveNewWorld.PR
                 var gau = Find();
                 if (gau == null) return;
                 var dropped = Unlearn(gau, id => Array.IndexOf(Start, id) < 0);
-                int taught = Start.Count(id => !StartSkills.Knows(gau, id) && StartSkills.Teach(gau, id));
+                int taught = Start.Count(id => Learn(gau, id));
                 if (EsperStore.Available) EsperStore.Flags |= FlagStartRages;
                 LastFix = $"Gau's first join: the PR's {dropped.Count} start rages un-learned ({string.Join(" ", dropped)}), " +
                           $"BNW's {string.Join(" ", Start)} taught ({taught} new); knows [{string.Join(" ", Known(gau))}]";
@@ -77,16 +81,27 @@ namespace BraveNewWorld.PR
                 var gau = Find();
                 if (gau == null) return;
                 var notes = new List<string>();
+                var before = Known(gau);
                 var dropped = Unlearn(gau, id => !Bnw.Contains(id));
                 if (dropped.Count > 0) notes.Add($"un-learned {string.Join(" ", dropped)} (not BNW rages)");
+                if (Reset != null && Reset.Value)
+                {
+                    var forgot = Unlearn(gau, id => Array.IndexOf(Vanilla, id) >= 0);
+                    int taught = Start.Count(id => Learn(gau, id));
+                    if (EsperStore.Available) EsperStore.Flags |= FlagStartRages;
+                    Reset.Value = false;   // one time (BepInEx saves the config on a change)
+                    notes.Add($"ForgetVanillaStartRages: forgot {string.Join(" ", forgot)}, taught {string.Join(" ", Start)} ({taught} new); " +
+                              $"knows [{string.Join(" ", Known(gau))}]; the switch is off again");
+                }
                 if (EsperStore.Available && (EsperStore.Flags & FlagStartRages) == 0)
                 {
-                    int taught = Start.Count(id => !StartSkills.Knows(gau, id) && StartSkills.Teach(gau, id));
+                    int taught = Start.Count(id => Learn(gau, id));
                     EsperStore.Flags |= FlagStartRages;
                     if (taught > 0) notes.Add($"taught BNW's start rage {string.Join(" ", Start)}");
                 }
                 if (notes.Count == 0) return;
-                LastFix = "Gau (older save): " + string.Join("; ", notes);
+                notes.Add($"list [{string.Join(" ", Known(gau, true, false))}], menu [{string.Join(" ", Known(gau, false, true))}]");
+                LastFix = $"Gau (older save, knew [{string.Join(" ", before)}]): " + string.Join("; ", notes);
                 Plugin.L.LogInfo("[rages] " + LastFix);
             }
             catch (Exception e) { Hooks.WarnOnce("GauRages.Sync", e); }
@@ -99,29 +114,63 @@ namespace BraveNewWorld.PR
             return null;
         }
 
+        // A character's abilities are held twice: OwnedAbilityList, and AbilityDictionary (by command), which the
+        // Abilities menu and the battle's Rage list read. The two can hold different OwnedAbility objects for one
+        // ability (the Deck, 2026-11-27: skill level 0 on the list's copies left the menu's rages known), so an
+        // un-learn sets both. The game's own client (AddAbility, in StartSkills.Teach) updates both itself.
+        static IEnumerable<OwnedAbility> Entries(OwnedCharacterData c, bool list, bool menu)
+        {
+            if (list && c?.OwnedAbilityList != null)
+                foreach (var a in c.OwnedAbilityList) if (a?.Ability != null) yield return a;
+            if (menu && c?.AbilityDictionary != null)
+                foreach (var group in c.AbilityDictionary.Values)
+                    if (group != null) foreach (var a in group) if (a?.Ability != null) yield return a;
+        }
+
         static List<int> Unlearn(OwnedCharacterData c, Func<int, bool> drop)
         {
-            var dropped = new List<int>();
-            if (c?.OwnedAbilityList == null) return dropped;
-            foreach (var a in c.OwnedAbilityList)
+            var dropped = new SortedSet<int>();
+            foreach (var a in Entries(c, true, true))
             {
-                if (a?.Ability == null || a.SkillLevel <= 0) continue;
+                if (a.SkillLevel <= 0) continue;
                 int id = a.Ability.Id;
                 if (id < FirstRage || id > LastRage || !drop(id)) continue;
                 a.SkillLevel = 0;
                 dropped.Add(id);
             }
-            return dropped;
+            return dropped.ToList();
         }
 
-        static List<int> Known(OwnedCharacterData c)
+        // one rage learned in both copies (the game's client adds a missing entry to both); true if it was new
+        static bool Learn(OwnedCharacterData c, int id)
         {
-            var known = new List<int>();
-            if (c?.OwnedAbilityList != null)
-                foreach (var a in c.OwnedAbilityList)
-                    if (a?.Ability != null && a.Ability.Id >= FirstRage && a.Ability.Id <= LastRage && a.SkillLevel >= 100) known.Add(a.Ability.Id);
-            known.Sort();
-            return known;
+            bool had = Known(c, true, false).Contains(id) && Known(c, false, true).Contains(id);
+            if (!StartSkills.Knows(c, id)) StartSkills.Teach(c, id);
+            foreach (var a in Entries(c, true, true)) if (a.Ability.Id == id && a.SkillLevel < 100) a.SkillLevel = 100;
+            // AddAbility puts a new entry in the list only: the list's object joins the dictionary's Rage group too
+            if (!Entries(c, false, true).Any(a => a.Ability.Id == id) && c.AbilityDictionary != null)
+            {
+                OwnedAbility mine = Entries(c, true, false).FirstOrDefault(a => a.Ability.Id == id);
+                foreach (var group in c.AbilityDictionary.Values)
+                {
+                    if (mine == null || group == null) break;
+                    bool rages = false;
+                    foreach (var a in group) if (a?.Ability != null && a.Ability.Id >= FirstRage && a.Ability.Id <= LastRage) { rages = true; break; }
+                    if (rages) { group.Add(mine); break; }
+                }
+            }
+            return !had;
+        }
+
+        static List<int> Known(OwnedCharacterData c) => Known(c, true, true);
+
+        // known in either copy (menu: the AbilityDictionary alone, which the Abilities menu shows)
+        static List<int> Known(OwnedCharacterData c, bool list, bool menu)
+        {
+            var known = new SortedSet<int>();
+            foreach (var a in Entries(c, list, menu))
+                if (a.Ability.Id >= FirstRage && a.Ability.Id <= LastRage && a.SkillLevel >= 100) known.Add(a.Ability.Id);
+            return known.ToList();
         }
 
         // harness gaurages: a New Game's Gau joins (the game's own JoinCharacter), then an older save's state is faked
@@ -146,12 +195,16 @@ namespace BraveNewWorld.PR
                 // an older save: vanilla's 9 known, no Soldier, the flag clear
                 int[] vanilla = { 811, 814, 819, 821, 825, 846, 854, 857, 866 };
                 Unlearn(gau, id => true);
-                foreach (int id in vanilla) StartSkills.Teach(gau, id);
+                foreach (int id in vanilla) Learn(gau, id);
                 if (EsperStore.Available) EsperStore.Flags &= ~FlagStartRages;
                 Sync();
                 var after = Known(gau);
                 var want = vanilla.Where(Bnw.Contains).Concat(EsperStore.Available ? Start : new int[0]).OrderBy(x => x).ToList();
                 Check(after.SequenceEqual(want), $"older save: knows [{string.Join(" ", after)}], want [{string.Join(" ", want)}] ({LastFix})");
+                var menu = Known(gau, false, true);
+                // a loaded save has the dictionary filled; a character who just joined in this session may have none yet
+                Check(menu.Count == 0 || menu.SequenceEqual(want), $"the Abilities menu's copy: [{string.Join(" ", menu)}], want [{string.Join(" ", want)}]" +
+                    (menu.Count == 0 ? " (not built yet: a join in this session)" : ""));
                 Sync();
                 Check(Known(gau).SequenceEqual(after), "the repair is stable (a second Sync changes nothing)");
             }

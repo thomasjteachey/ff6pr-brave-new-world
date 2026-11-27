@@ -14,6 +14,21 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
   of vanilla's set stay, a Leap could have taught them). Harness `gaurages` PASS on the laptop
   (build/test_logs/20261127-145653_gaurages@laptop.log). **0.26.13** (DLL md5 261667b4): Rules.Tests 40/40, test_mod
   57 OK, laptop gate build/batches/bnw-0.26.13-release.json (gaurages + joinlv) PASS.
+  After 0.26.13 (unreleased): the Deck's slot 2 Gau knew the PR's 9 + Vaporite (870, a Leap), read from a sandbox
+  copy (build/save_sandbox/deck_gau_20261127, batch bnw-gau-deck-save.json). Config `Gau.ForgetVanillaStartRages`
+  (default off): once, on the field, he also forgets the six BNW rages of the PR's set, learns Soldier, and the
+  switch turns itself off. On the sandbox copy: knows [801 870] after, PASS (PC, windowless). Set on the Deck
+  (config backup `ff6mod.bravenewworld.cfg.bak-gau`, DLL 87a0bdd1); the user loads slot 2 and saves.
+  DIDN'T WORK on the Deck (screenshot 18:13: Soldier + all 9 + Vaporite): a character's abilities are held twice,
+  OwnedAbilityList and AbilityDictionary (by command, filled on a save's load), and the Abilities menu shows a rage
+  known in either. SkillLevel 0 on the list's objects left the dictionary's; the game's AddAbility adds to the list
+  only. So 0.26.13's un-learn didn't reach the menu for loaded saves (a first join is fine: no dictionary yet).
+  Now GauRages un-learns and teaches in both (Learn adds the list's object to the dictionary's Rage group); the log
+  shows "list [...], menu [...]". Deck save copy: list [801 870], menu [801 870] PASS; New Game gaurages PASS (PC).
+  DLL 7ba1e486 on the Deck, switch on again. The kit's StartSkills (Teach / Knows) touches the list only too.
+  **0.26.14** (DLL md5 48a3ffac): both copies + the ForgetVanillaStartRages switch. Rules.Tests 40/40, test_mod 57 OK,
+  PC gate build/batches/bnw-0.26.14-release-pc.json: Deck save copy + switch PASS, New Game gaurages PASS, joinlv
+  self-test ok (its "first join: Locke" pattern missed only because the reused game already had Gau: it took him).
 
 - 2026-11-27 (session "suplex train"): **0.26.12: BNW's battle talk** (the user: "aren't you suppoed to get a stupid
   line when you suplex the train in bnw snes?"). BNW rewrote four battle events (asm/banks/d0.asm; new kit
