@@ -31,7 +31,12 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
   the PR's idle act (696) as an idle turn's does. **This changes WC too** (its message-only counters now show,
   as on the SNES): for the kit lead / next WC release. (6) Kit harness `act ... [turn]`: a party member's act not
   marked as a counter (BNW's CounterRules ignore hits by counterattacks, the harness's default). PC batch
-  bnw-suplex-train: all 3 pass ("battle line BNW_BTL_014_01 shown", BNW_BTLD_215, BNW_BTLD_212).
+  bnw-suplex-train: all 3 pass ("battle line BNW_BTL_014_01 shown", BNW_BTLD_215, BNW_BTLD_212). Gate
+  bnw-0.26.12-release-pc.json passes (the Giant-counter probe stalled after the poison probe's wipe as in 0.26.10;
+  passes alone, bnw-0.26.10-counter.json). Released: GitHub v0.26.12 Latest (BNW repo e0da2c8, kit 6e766e3; zip
+  SHA-256 5937046b...c28d78c, DLL md5 4fab8604), Nexus 167 via publish-nexus.yml. Not on the Deck (offline):
+  `deck_push.sh bnw` when it's back. Kit clone: testing.md, Harness.cs, test_batch.py left uncommitted (other
+  sessions' edits).
   Gate: build/batches/bnw-suplex-train.json (PC: Soul Train hit by 133, Ziegfried 480, Kaiser 8410), test_mod
   Dialogue.test_battle_slots_bnw_reused.
 - 2026-11-27 01:25 (session "BNW gil line"): **0.26.11: scripted gil gifts say their amount** (the user: "obtained flame
