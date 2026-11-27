@@ -1248,6 +1248,40 @@ class Dialogue(unittest.TestCase):
                     self.assertIsNone(re.search(r"[\\{}|^£_]", plain), f"{k}: SNES glyph left: {page}")
                     self.assertLessEqual(max(len(r) for r in plain.split("\n")), 240, k)
 
+    def test_battle_slots_bnw_reused(self):
+        # BNW rewrote battle events 08, 0B, 13, 19 (D0 bank): the slots of vanilla's Blitz tutorial and Sealed Gate
+        # talk hold its Kaiser/Ziegfried lines and an unused suplex banter. The PR's lines there keep the PR's text
+        # (2026-11-27: the Vargas tutorial read "*whisper* *whisper*" and Kaiser's monologue)
+        for name in ("bnw", "vnw"):
+            lines = self.data[name]
+            for k in ("E0055_03_343_b_02", "E0055_03_343_b_05", "E0055_03_343_b_07", "E0055_03_343_b_08",
+                      "E0055_03_343_b_10", "E0460_01_606_b_01", "E0460_01_606_b_06", "E0097_00_999_b_01"):
+                self.assertNotIn(k, lines, f"{name} {k}: {lines.get(k)}")
+            added = self.data["added"][name]
+            # ...and the talk of those events, as lines of their own for the AI host (profile snes_ai_event_talk)
+            for n in (212, 213, 214, 215, 216, 252, 255):
+                self.assertIn(f"BNW_BTLD_{n:03d}", added, name)
+            self.assertIn("I am Kaiser", added["BNW_BTLD_214"][1])
+            self.assertTrue(all(p.count('"') % 2 == 0 for k, v in added.items() if k.startswith("BNW_BTLD") for p in v[1:]))
+        # the AI host shows them on Ziegfried's event 13 and Kaiser's 0B (bnw_data snes_ai event_lines)
+        mod = os.path.join(P.ROOT, "mods", "BraveNewWorld")
+        sa = json.load(open(os.path.join(mod, "bnw_data.json"), encoding="utf-8"))["snes_ai"]
+        self.assertEqual(sa["event_lines"]["305"]["19"], ["BNW_BTLD_215", "BNW_BTLD_216", "BNW_BTLD_252", "BNW_BTLD_255"])
+        self.assertEqual(sa["event_lines"]["311"]["11"], ["BNW_BTLD_212", "BNW_BTLD_213", "BNW_BTLD_214"])
+        # the Soul Train's "ACHIEVEMENT UNLOCKED / SUPLEXED A TRAIN" (its counter: FC 02 5E, F3 0E): BNW's attack 5E
+        # is Suplex (it swapped Suplex and Aurabolt), PR 133 in the port, named so. And BNW's Suplex never misses
+        # for "can't be suplexed" (no special effect; byte $13 bit 2 is its boss flag): no such rule, no such list
+        self.assertEqual(sa["attacks"][0x5E], 133)
+        self.assertEqual(sa["message_keys"]["14"], ["BNW_BTL_014_01", "BNW_BTL_014_02"])
+        names = dict(l.split("\t", 1) for l in open(os.path.join(mod, "message", "Assets", "GameAssets", "Serial", "Data",
+                     "Message", "system_en.txt"), encoding="utf-8").read().splitlines() if "\t" in l)
+        self.assertEqual(names["MSG_MAGIC_NAME_110"], "Suplex")
+        self.assertFalse(os.path.exists(os.path.join(P.ROOT, "plugin", "BnwPlugin", "SuplexRules.cs")))
+        self.assertNotIn("no_suplex", json.load(open(os.path.join(mod, "bnw_data.json"), encoding="utf-8")))
+        # the Figaro scene (Edgar and Locke see Terra's magic): every line BNW's
+        self.assertEqual(self.data["bnw"]["E0036_01_021_b_06"], ["*whisper* *whisper*"])
+        self.assertIn("E0036_01_021_b_12", self.data["bnw"])
+
     def test_known_lines(self):
         bnw, vnw = self.data["bnw"], self.data["vnw"]
         # dialogue 2 (Wedge: "Probably, judging from the urgency of our orders.") is E0001_03_020_a_05

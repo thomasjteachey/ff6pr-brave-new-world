@@ -37,6 +37,7 @@ OUT = os.path.join(P.ROOT, "mods", "BraveNewWorld", "bnw_dialog.json")
 NAMES = ["(TINA)", "(ROCK)", "(KAIEN)", "(SHADOW)", "(EDGAR)", "(MASH)", "(CELES)", "(STRAGUS)", "(RELM)",
          "(SETZER)", "(MOG)", "(GAU)", "(GOGO)", "(UMARO)"]
 SPEAKER = re.compile(r"^\s*(<A\d+>|[A-Z][A-Za-z0-9.'\- ]{0,16}):(?:\s+|(?=_))")
+SPEAKERS = re.compile(r"^\s*<A\d+>(?:\s+<A\d+>)+:\s*")
 TURN_SPLIT = re.compile(r"\n(?=\s*(?:<A\d+>|[A-Z][A-Za-z0-9.'\- ]{0,16}):(?:\s|_))")
 
 
@@ -72,6 +73,7 @@ def convert(turn, mode="plain"):
     if "<C>" in s:
         s = s.split("<C>")[0]
     s = SPEAKER.sub("", s.strip("\n") if mode == "formatted" else s.strip())
+    s = SPEAKERS.sub("", s)   # two speakers at once ("<A$04> <A$01>: *whisper* *whisper*"): the PR's name box shows them
     if re.search(r"[\\{}|^£]|\$(?![0-9A-F]{2}>)", s):
         return None   # SNES button glyphs (a controls tutorial): the PR's own lines show its controls
     s = re.sub(r"<A(\d+)>", lambda m: NAMES[int(m.group(1))] if int(m.group(1)) < len(NAMES) else "", s)
@@ -138,7 +140,18 @@ ADDED_LINES = {
     **{f"BNW_E0460_{n + 1:02d}": 0xA60 + n for n in range(6)},
     # Mog joining in the World of Ruin (PR sc_e_0778, BNW CC/396C): his tips on BNW's Dances
     "BNW_E0778_01": 0x279, "BNW_E0778_02": 0x27B,
+    # BNW's battle events with only talk, which the PR has no scene for (snes_battle_events; the kit's
+    # SnesAiHost shows them when the monster's script triggers the event: profile_bnw snes_ai_event_talk):
+    # Kaiser's monologue (event 0B), Ziegfried's heart attack on the Phantom Train (13). Not Wrexsoul's two
+    # taunts (events 19, 08: dialogues 250, 251): the port keeps the PR's own Wrexsoul fight and AI
+    **{f"BNW_BTLD_{n:03d}": M.BATTLE + n for n in (212, 213, 214, 215, 216, 252, 255)},
 }
+# PR lines the line map didn't place, pinned to their SNES dialogue (dialog_map numbering): the Figaro
+# scene where Edgar and Locke see Terra's magic (vanilla battle event 06, battle dialogues 189-197)
+PINNED = {"E0036_01_021_b_06": M.BATTLE + 189, "E0036_01_021_b_07": M.BATTLE + 190,
+          "E0036_01_021_b_08": M.BATTLE + 191, "E0036_01_021_b_11": M.BATTLE + 194,
+          "E0036_01_021_b_12": M.BATTLE + 195, "E0036_01_021_b_13": M.BATTLE + 196,
+          "E0036_01_021_b_14": M.BATTLE + 197}
 # speakers for added lines whose BNW text names none (the PR shows the name box from these)
 ADDED_SPEAKERS = {"BNW_E0778_01": "(MOG)", "BNW_E0778_02": "(MOG)"}
 
@@ -163,7 +176,14 @@ def repurposed_dialogues():
                 u[ins.args["dlg"] & 0x7FFF].update(p.maps_of[off])
         return u
     uv, ub = usage(E.load("us")), usage(event_diff.rom_for(path, [(0x230000, 0x260000)]))
-    return {d for d in uv if d in ub and not (uv[d] & ub[d])}   # the line map numbers dialogues as the event code does
+    field = {d for d in uv if d in ub and not (uv[d] & ub[d])}   # the line map numbers dialogues as the event code does
+    # battle dialogues: those BNW's battle events show from other events than vanilla's (its Ziegfried, Kaiser
+    # and Wrexsoul talk in the slots of vanilla's Blitz tutorial and Sealed Gate talk; the suplex banter
+    # it left in the Sealed Gate's slots, which no event shows): the PR's Vargas tutorial and Sealed Gate
+    # lines placed on them keep the PR's text
+    import snes_battle_events as SBE
+    battle = SBE.repurposed(SBE.rom_bytes(P.VANILLA_ROM), SBE.rom_bytes(path))
+    return field | {M.BATTLE + n for n in battle}
 
 
 # choices the port gives more options than the PR's (port_bnw_scenes): the PR's option group -> the
@@ -255,6 +275,10 @@ def added_lines(caps):
             a = re.fullmatch(r"<A(\d+)>", name)
             speaker = (NAMES[int(a.group(1))] if int(a.group(1)) < len(NAMES) else "") if a else name.strip()
         pages = [p for p in (convert(x) or _got(x) for x in bt) if p]
+        # a quote BNW opens in one battle caption and closes in a later one (Kaiser's monologue): each
+        # added line is a box of its own, so each gets both marks
+        pages = [p + '"' if p.startswith('"') and p.count('"') == 1 else
+                 '"' + p if p.endswith('"') and p.count('"') == 1 else p for p in pages]
         if pages:
             out[key] = [speaker or ADDED_SPEAKERS.get(key, "")] + pages
     out.update(turn_lines(caps))   # bnw-scenes: per-speaker-turn keys (ADDED_TURN_DIALOGUES)
@@ -461,6 +485,9 @@ def build(rebuild_map=False, write=True):
         M.build(verbose=True)
     dmap = json.load(open(path, encoding="utf-8"))
     jp = json.load(open(os.path.join(M.OUT, "jp_turns.json"), encoding="utf-8"))
+    for k, d in PINNED.items():
+        if k not in dmap:
+            dmap[k] = [d, 0, max(0, len(jp[d]) - 1), 1.0, "pinned"]
     pre = M.pr_lines("en")
     # kept as the PR has them: centered narration, item/number lines, names, and timed lines (the
     # opera's lyrics: <WAITnn> then a new line, (FULL_SPACE) indents)

@@ -139,6 +139,12 @@ class BraveNewWorld(Profile):
         373: {0x0E: 1},            # the Trooper, stolen from: Locke's disguise (sc_b_0071)
         311: {0x0B: None},         # Kaiser: its opening event (no PR counterpart)
     }
+    # ...and of those, the ones with only talk the PR has no scene for: the kit's AI host shows the event's
+    # battle dialogues as the monster's battle lines (keys BNW_BTLD_nnn: bnw_dialog ADDED_LINES gives their
+    # text in both scripts). Ziegfried's heart attack on the Phantom Train (BNW's event 13, D0/B4BA) and
+    # Kaiser's monologue (0B, D0/A851). Wrexsoul's (19, 08) wait: the port keeps the PR's own Wrexsoul fight
+    snes_ai_event_talk = {305: [0x13], 311: [0x0B]}
+    snes_ai_event_talk_key = "BNW_BTLD_{:03d}"
     # BNW's fights the PR has no party for: formation -> the PR party whose look the new one takes
     # (port_ai.new_fights: party 8000 + formation). Kaiser (0x19a: the post-game superboss) on the dragons'
     # look (Gold Dragon's party 370); Kefka and two Centurions (0x179, where vanilla had an event battle)

@@ -16,7 +16,7 @@ namespace BraveNewWorld.PR
     public class Plugin : BasePlugin
     {
         public const string Guid = "ff6mod.bravenewworld";
-        public const string Version = "0.26.11";
+        public const string Version = "0.26.12";
         internal static ManualLogSource L;
 
         public override void Load()
@@ -178,8 +178,9 @@ namespace BraveNewWorld.PR
             UmaroRules.Enabled = turnRules.Value;
             UmaroRules.Apply(harmony);
             Coliseum.Apply(harmony);   // BNW's Coliseum matches (the kit's SnesColiseum)
-            SuplexRules.Enabled = damageRules.Value;
-            SuplexRules.Apply(harmony);   // Suplex misses BNW's can't-be-suplexed monsters (the kit's SnesSuplex)
+            // no "can't be suplexed" rule: BNW's Suplex (SNES 5E) has no special effect (spell byte 9 = FF; vanilla's
+            // $30 kept Suplex off monsters with byte $13 bit 2, and BNW's per-strike $30 is a no-op), and bit 2 is its
+            // boss flag for fractional damage: Suplex hits everything, the Soul Train too (2026-11-27)
             ReviveRules.Enabled = damageRules.Value;
             ReviveRules.Apply(harmony);   // BNW's revive amounts: Phoenix Down 1 HP, Phoenix Tear 3/4, Life 250-500
             ItemHealRules.Enabled = damageRules.Value;

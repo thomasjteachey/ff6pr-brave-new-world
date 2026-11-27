@@ -92,9 +92,8 @@ def plugin_data(rom):
         # the Coliseum (BNW changed all 255 wagers): the kit's PrKit/Ff6/SnesColiseum answers the
         # PR's lookups from these rows
         "coliseum": coliseum(van, rom),
-        # Suplex misses these (SNES monster byte $13 bit 2; BNW's own 84, vanilla 159): PR monster
-        # ids, the Coliseum's copies of them too (the kit's PrKit/Ff6/SnesSuplex)
-        "no_suplex": no_suplex(rom),
+        # no "no_suplex": BNW's Suplex has no can't-be-suplexed miss (no special effect; byte $13 bit 2 is
+        # its boss flag for fractional damage, c2.asm Fractional), 2026-11-27
         "die_at_zero_mp": die_at_zero_mp(rom),
         # weapons that allow Runic / Bushido (SNES weapon byte 19 bit 7 / bit 1; the PR's
         # hard-coded BlockMagicSwordData / KillingSwordData .ValidWeaponContentId are exactly
@@ -121,16 +120,6 @@ def coliseum(van, rom):
     (reversible_bets.asm: $D5 arrow, $C7 trade loop) and $00 hides the reward (vanilla: $FF)."""
     import seed_info
     return seed_info.coliseum(van, rom, hidden=lambda b: b == 0)
-
-
-def no_suplex(rom):
-    """PR monster ids Suplex misses: BNW's monsters with "can't be suplexed" (byte $13 bit 2) and the
-    PR's Coliseum copies of them (port.monster_copies)."""
-    import port
-    ids = {M.monster(e.id) for e in S.enemies(rom) if e.raw[19] & 4}
-    ids.discard(None)
-    ids |= {c for c, j in port.monster_copies().items() if j in ids}
-    return sorted(ids)
 
 
 def die_at_zero_mp(rom):

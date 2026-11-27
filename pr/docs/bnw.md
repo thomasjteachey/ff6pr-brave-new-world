@@ -4,6 +4,46 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
 
 ## Live progress (newest first)
 
+- 2026-11-27 (session "suplex train"): **0.26.12: BNW's battle talk** (the user: "aren't you suppoed to get a stupid
+  line when you suplex the train in bnw snes?"). BNW rewrote four battle events (asm/banks/d0.asm; new kit
+  `tools/snes_battle_events.py` reads D0/9800 in both ROMs): 08 Wrexsoul (dialogue 251), 0B Kaiser (212-214), 13
+  Ziegfried's heart attack on the Phantom Train (215, 216, 252, 255; formerly Kefka at the Sealed Gate), 19 Wrexsoul
+  (250). So the slots of vanilla's Blitz tutorial (83-86, 212-216) and Sealed Gate talk (95-102) hold BNW's lines,
+  plus a suplex banter ("S-U-P-L-E-X! ... He suplexed a TRAIN!?", 79-86, 95-102) that no BNW 3.0 event shows (VNW
+  3.0 blanks it). Fixes: (1) `bnw_dialog.repurposed_dialogues` adds those battle slots, so the PR's Vargas tutorial
+  ("How to use Blitz:" had read "*whisper* *whisper*", steps 1-5 Kaiser's monologue), Sealed Gate ("K-Kefka! You
+  followed us here!?" -> "Sorry, I... um...") and Shadow's leave line keep the PR's text. (2) Talk-only events the
+  PR has no scene for are shown by the kit's AI host as the monster's battle lines: profile `snes_ai_event_talk`
+  {305: [13], 311: [0B]} -> bnw_data `snes_ai.event_lines` (keys BNW_BTLD_nnn, bnw_dialog ADDED_LINES, both
+  scripts); kit SnesAiData.EventLines + SnesAiHostHooks.Plan. Wrexsoul's two taunts are not in: the port keeps
+  the PR's own Wrexsoul fight (boss 359 kept PR script). (3) The Figaro magic scene (E0036_01_021_b_06..14, battle
+  dialogues 189-197) pinned (bnw_dialog PINNED): it had mixed BNW and PR lines; two-speaker prefixes stripped.
+  (4) **The port's BNW "can't be suplexed" rule was wrong twice, now removed** (SuplexRules.cs, bnw_data
+  no_suplex, BnwData.NoSuplex). BNW swapped Suplex and Aurabolt (SNES 5E/5F) and the port keeps each in its vanilla
+  PR slot, so BNW's Suplex is PR 133 (MSG_MAGIC_NAME_110 "Suplex"), Aurabolt 134: the rule (11-20/21, "BNW's
+  Suplex (ability 134)" below) made Aurabolt miss 96 monsters. And BNW's Suplex has no such miss at all: its spell
+  byte 9 (special effect) is FF (vanilla's Suplex $30 = the per-strike C2/428B that keeps Suplex off monsters with
+  byte $13 bit 2; BNW also points per-strike $30 at a no-op, c2.asm "Remove random targeting from Suplex effect"),
+  and bit 2 is BNW's boss flag for fractional damage (c2.asm Fractional). The first PC batch caught it: "Suplex on
+  monster 263 missed" on the Soul Train, so its "ACHIEVEMENT UNLOCKED / SUPLEXED A TRAIN" (message 0E on FC 02 5E,
+  already ported as BNW_BTL_014) could never show. (5) Kit SnesAiHostHooks.Counter: a counter whose script only
+  shows a battle line (that one: "Message 0e; ChangeVar 24") dropped the line (no act to ride on); it now rides on
+  the PR's idle act (696) as an idle turn's does. **This changes WC too** (its message-only counters now show,
+  as on the SNES): for the kit lead / next WC release. (6) Kit harness `act ... [turn]`: a party member's act not
+  marked as a counter (BNW's CounterRules ignore hits by counterattacks, the harness's default). PC batch
+  bnw-suplex-train: all 3 pass ("battle line BNW_BTL_014_01 shown", BNW_BTLD_215, BNW_BTLD_212).
+  Gate: build/batches/bnw-suplex-train.json (PC: Soul Train hit by 133, Ziegfried 480, Kaiser 8410), test_mod
+  Dialogue.test_battle_slots_bnw_reused.
+- 2026-11-27 01:25 (session "BNW gil line"): **0.26.11: scripted gil gifts say their amount** (the user: "obtained flame
+  scroll. obtained (NUM) gil ... phantom train sparkle treasure"). SetGilTag fills (KINGAKU) (the inns' "Rooms are
+  (KINGAKU) gil per night"), not the chests' (NUM), which the engine fills from a chest entity's content_num; so 0.26.10's
+  gil gifts (sc_e_1107, sc_e_0767_1) said "(NUM)". Now the kit's `port_chests.MSG_GIL_GIFT` = PRKIT_GIL_GIFT, the chests'
+  "Obtained (NUM) gil!" (story_mes) with (KINGAKU), written by port.py into story_mes_en (+ a blank story_cha row);
+  port_bnw_rewards' gifts use it too. test_mod `test_gil_tags_name_price_groups` also fails a (NUM) line after SetGilTag.
+  PASS build/batches/bnw-gil-line.json (shots build/shots/bnw_gil/: "Obtained 1000 gil!", "Obtained 20000 gil!"; gil and
+  flags right). Released: GitHub v0.26.11 Latest (BNW repo 47f19de, kit 22664ae; zip SHA-256 b8e6e0a0...0ac62640, DLL md5
+  fda2e482), Nexus 167 via publish-nexus.yml. Not pushed to the Deck (the user was playing).
+
 - 2026-11-26 01:00 (session "Fire scroll soft lock on Phantom Train"): **0.26.10: the Phantom Train Fire Scroll soft
   lock, scripted gil gifts, recovery points** (the user's Deck: "i picked up the fire scroll in the phantom train and it
   soft locked my game"). (1) The port numbered each added object (recovery points, BNW's save points, Leo's Spirits NPC,

@@ -140,7 +140,6 @@ namespace BraveNewWorld.Rules
         public int[][] UmaroRows = Array.Empty<int[]>();       // per relic set: weights of 255, 255 = not available
         // the Coliseum (tools/seed_info.coliseum rows: wager content, vanilla party, vanilla reward, party, reward, hidden, monster)
         public int[][] ColiseumRows = Array.Empty<int[]>();
-        public int[] NoSuplex = Array.Empty<int>();             // PR monster ids Suplex misses (SNES byte $13 bit 2; Coliseum copies too)
         // "runic" / "bushido" -> weapon content ids that allow the command (vanilla's, BNW's)
         public Dictionary<string, (int[] Vanilla, int[] Bnw)> CommandWeapons = new Dictionary<string, (int[], int[])>();
         public List<StatBonus> ElBonuses = new List<StatBonus>();
@@ -296,8 +295,6 @@ namespace BraveNewWorld.Rules
             }
             if (root.TryGetProperty("coliseum", out var coliseum))
                 d.ColiseumRows = coliseum.EnumerateArray().Select(Ints).ToArray();
-            if (root.TryGetProperty("no_suplex", out var noSuplex))
-                d.NoSuplex = Ints(noSuplex);
             if (root.TryGetProperty("command_weapons", out var cw))
                 foreach (var kv in cw.EnumerateObject())
                     d.CommandWeapons[kv.Name] = (Ints(kv.Value.GetProperty("vanilla")), Ints(kv.Value.GetProperty("bnw")));
