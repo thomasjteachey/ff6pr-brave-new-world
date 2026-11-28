@@ -4,6 +4,51 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
 
 ## Live progress (newest first)
 
+- 2026-11-28 (afternoon): **A Bomb's Exploder blew up its own Conjurers on the Veldt (the user: "is the bomb in the veldt
+  supposed to explode on the conjurer?", without hitting the Bomb).** BNW's Bomb (SNES 79, PR 80): main "if var $24 bit 0
+  clear and HP <= 256: F1 43 (all characters), Exploder 171"; counter "hit by melee: F1 45 (its attacker, characters only
+  in BNW), Exploder". BNW moved Exploder to slot 171 (PR 308) with targeting byte $04 (both parties); the spell porter
+  templated it on the Lore's row 163 (function group 505, range 3) and turned $04 into range 9 (the whole field), and the
+  PR's 505 at range 9 damaged the caster's side: batch build/batches/bnw-bomb-exploder.json (Veldt save, party 2054,
+  Bombs at 250 HP) showed the act aimed at Sabin + Cyan while both Conjurers took the Bomb's 194 HP. (1) Porter
+  (tools/port_spells.py): range 9 only on a template that is range 9 itself, otherwise 4 (all of one side); only 308 in
+  BNW (52/266 come from Quake's range-9 row). Range 4: the party takes 250 each, Conjurers 400/400; range 6 put the
+  blast back on the Conjurers. (2) Kit (PrKit/Ff6/SnesAiTargets.cs): at range 4 the PR widened the counter's single
+  target (its attacker) to the whole party; an act the AI host planned now keeps only its script's targets (after
+  CreateActData and TargetFunction.ExtractTarget/CommonExtractTarget), as F1 does on the SNES: "act kept to its script's
+  1 target(s), not 2 (ExtractTarget)" on both counters seen. WC regression: build/batches/wc-kit-targets.json.
+- 2026-11-28 (afternoon): **Returners' briefing freeze: the reporter's own save doesn't reproduce it either.** The
+  reporter (Nexus 167) sent their save folder: BNW's own files (`BraveNewWorld_slot1/21/22`), autosave slot 21 on
+  map 66 (outside, Terra alone, Banon by the cave; flags 32/33/34 and AreaLocalVariable 1 all 0), suspend slot 22 on
+  map 67. Sandbox build/save_sandbox/nexus_hideout_20261128. On the PC with graphics, walking Terra to Banon and
+  talking (down, right 2, up, face right): Yes plays sc_e_0062_2 to its ChangeMap 72 (shots: "Locke!", Edgar "Uh,
+  Locke...", Banon "What about us?"); the third No (flags 32/33 set first, own launch) plays sc_e_0062_1 to map 72
+  too (build/batches/bnw-hideout-nexus4.json / -nexus5.json, shots build/shots/hideout_nexus). The saves decrypt
+  in Windows PowerShell (RijndaelManaged 256-bit block, SaveSlotManager's Password/Salt, 10 iterations, then
+  Deflate). Test pitfalls: `script sc_e_0062` from Terra's saved spot stalls (Banon's puppets need the talk
+  position); a second request in the same launch after the scene finished loads with Banon gone (use one launch per
+  path); `load 21` is refused (`load` takes the autosave). Open: the reporter's BNW version, PC or Deck, other mods,
+  and BepInEx/LogOutput.log right after a freeze.
+- 2026-11-28: **Locke stole a Dirk from the Merchant and got no disguise (the user)**: the kit's AI host read FC 01's
+  command from GetRecevieForAiTypeId (chanting.csv's coarse category), so Steal read as Fight. Fixed in kit f479098
+  (SnesAiHostHooks.SnesCommandOf: the act's PR command); see "Open" (1) below. Harness `aiact <command> <ability>
+  [character] [monster]`. **0.26.20** released 11-28 ~17:57 UTC (GitHub Latest, BNW repo 2ba9f15, kit f479098; the
+  published 0.26.19 zip with only the DLL swapped, DLL md5 a81e43f9 built from the clone + kit; zip SHA-256
+  54704bb8...8aac2e3b; Nexus 167 via publish-nexus.yml). Gate on the laptop: build/batches/bnw-0.26.20-release.json
+  (Merchant steal -> disguise, ScenarioFlag1 52 = 1; Vargas story). Rules.Tests 40/40, test_mod 58 OK. Deck: dev build
+  49c0f4e4 (same fix), not the release DLL (user playing); PC: BNW held aside by a T-Edition test.
+- 2026-11-28: **BNW's starting ATB ("First Strike", c2.asm InitializeATBTimers) never applied**: FirstStrike.cs hooked
+  BattleProgressATB.InitATBGauge, which FF6 never calls (no "first strike" line in any log). A probe run showed FF6's
+  opening: BattleProgressATBFF6.Init -> BattleProgressATB.Init -> AddGaugeStatus (all 0) -> SetPreeMptive
+  (BattlePopPlug.Calculation rolls and stores the type, then the PR's ACCUMULATION_ATB_* gauges), and SetPreeMptive
+  runs a second time in the same frame after Init. Now an Init prefix stamps the frame and a SetPreeMptive postfix
+  applies BNW's values on both calls. Harness `firststrike [force <state>|off]` (forces the next battles' encounter
+  type, prints "P<Speed>:<gauge>"). build/batches/bnw-first-strike.json (Veldt save, party 5) PASS on the PC: front
+  Speed 44/30 = 55%/42%, back party 46%/40% + monsters 100, preemptive party 100 + monsters 1/255. BC's
+  BcJunctionStart hooks the same dead method (note left for the BC lead). **0.26.19** released 11-28 ~17:42 (GitHub
+  Latest, BNW repo 75b837e, kit b64c5b1; the published 0.26.18 zip with only the DLL swapped, since ability.csv 308
+  holds another session's unreleased range change; zip SHA-256 b8b58f35...6c6e6e, DLL md5 15d1eddc). The release DLL
+  itself was not run in-game (the PC game was busy); the passing build differs only by another session's `aiact`.
 - 2026-11-28: **Chakra restored 1 (the user: "chakra from gau using the rage command healed everyone for 1")**.
   Ability 137's standard_value is a placeholder 1 that ChakraGpRules replaces with (Stamina + Level) / 2 MP (caster
   misses); its postfix sat only on GetRecoveryStatus / GetFixedBaseValueRecoveryStatus and never ran in play (no
@@ -625,7 +670,14 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
   (PR item 18; profile_bnw table_overrides give it Phoenix Down's revive). test_mod 50/50, Rules.Tests 34/34; not yet seen in
   game. **Open:** (1) non-humanoids don't counter Steal (the user): BNW's scripts have it (Leafer: if hit by command 05, attack
   101) and the AI host maps Steal 607 -> 05, but it only counters when the PR calls CounterAct with IsReadyActCounter; QA's
-  laptop request steal-counter-1 (build/batches/bnw-steal.json) shows whether a Steal ever gets there. (2) Cyan's dream still
+  laptop request steal-counter-1 (build/batches/bnw-steal.json) shows whether a Steal ever gets there.
+  **Fixed 2026-11-28** (the user: Locke stole a Dirk from the Merchant, no disguise): a Steal does reach CounterAct, but
+  the host read what hit it from `GetRecevieForAiTypeId`, which is chanting.csv's coarse for_ai_type_id (1 physical, 2
+  magic, 3, 4 other), so every Steal/Mug/Blitz/Tools... read as Fight (00) and a Fight as nothing (ff). The kit's
+  SnesAiHostHooks now takes the PR command of the act that hit (`SnesCommandOf`: command.csv id -> SNES command, Magic
+  with an esper's ability = Summon 19), else the received ability's type_id (table corrected: 611 is Sketch, Tools 623).
+  Laptop: `build/batches/bnw-merchant-steal.json` (harness `aiact 10 8 2 315`: Locke's Steal) PASS: cmd 05, event 0f ->
+  PR mode 1, the disguise scene, ScenarioFlag1 52 = 1. The Trooper (373) and BNW's other Steal/Shock/Jump counters share it. (2) Cyan's dream still
   stops on the laptop (20:24 port): sc_e_0900 (the door's push-back) never ends even without entity 0's puppet, and the
   Stooges' fight 8346 sits at PreeMptiveMes even with sc_b_2028 kept. The door scene reached its fight only once ALL puppet
   calls were gone, so the player's own puppet (-1001) seems to hang in the dream maps (the PR may still run them in "corps"
