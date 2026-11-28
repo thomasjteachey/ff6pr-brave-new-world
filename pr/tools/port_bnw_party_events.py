@@ -1,5 +1,5 @@
 """BNW's party events in the PR's own scripts (batch C of the readme audit, 2026-11-21: readme "Can't Lose Our
-Shadow", "Zozo Unequip", "Scenario Unequip"). Three changes, each where BNW's asm makes it:
+Shadow", "Zozo Unequip", "Scenario Unequip"), plus Gau's return after a Leap (4). Each where the SNES makes it:
 
 1. Shadow never runs off at random. Vanilla rolls at a battle's end (C2/4880: LDA #$08 : BIT $3EBD skips the
    leave while battle bit 0x4B is set; C2/2437 copies the bits from $1DC9, so 0x4B is $1DD2 bit 3) and its
@@ -32,6 +32,15 @@ Shadow", "Zozo Unequip", "Scenario Unequip"). Three changes, each where BNW's as
    and "最強装備：エドガー" first (SetStrongestEquipTina/Edgar -> SetStrongestEquipCommon(1)/(5): the
    strongest weapon, shield, helmet and armor, no relics, as the SNES's 9C).
 
+4. Gau back from a Leap can't be scared off. The SNES brings him back after a won Veldt fight with no window to
+   hit him (C2's end-of-battle Leap return). The PR turns the enemy side into a stand-in Gau after the win
+   (sc_b_0239 Mode03Before: "敵パーティをガウに", monsters 549/550, AI sc_ai_549_Gau) and resumes the battle; the
+   stand-in's AI sets mode 1 on its turn (Event00: "バトル加入：ガウ", he rejoins) but mode 3 when anyone hits it,
+   uses a command or an item on it (Event02: he runs off, still away). Auto-battle attacks the only enemy there,
+   so a fight ended on auto lost the return (the user, 2026-11-27). The stand-in's 11 checks that jump to its
+   "ダメージを受けた時" block become Nops: it always takes the rejoin (dried meat still works). The first meeting's
+   Gau (sc_ai_172_Gau) still runs off when attacked, as on the SNES.
+
     port(out_dir, log, profile=None)   writes the scripts' copies and <group>/keys/bnw_party_events.json
     check(mod_dir)                      problems in a port's copies ([] when all three are in)
 
@@ -54,6 +63,13 @@ LOTTERY = "シャドウ離脱抽選"          # Current.LotSecedeShadow
 LEAVE = "バトルでシャドウ離脱"        # Current.RemoveShadowInBattle
 LEAVE_SCRIPTS = ("sc_b_0097", "sc_b_0239", "sc_b_2006", "sc_b_2008")
 NO_LEAVE = "BNW: Shadow never leaves at random (port_bnw_party_events)"
+
+# 4. Gau back from a Leap: the returning stand-in's AI, and its jumps to the "attacked" block (target operand index)
+AI_DIR = os.path.join(P.VANILLA, "monster_ai", "Assets", "GameAssets", "Serial", "Res", "Battle", "MonsterAI")
+RETURN_AI = "sc_ai_549_Gau"
+ATTACKED = "ダメージを受けた時"
+FLEE_JUMPS = {"DamagedJump": 0, "IsCheckReceiveCommand": 1, "IsRecevieItem": 1}
+NO_FLEE = "BNW: Gau's return after a Leap can't be scared off (port_bnw_party_events)"
 
 # 2. Zozo: (PR script, the op after which the party is final, the ChangeMap's first iValue, SysCalls before it)
 ZOZO = ("sc_e_0307_1", ("SysCall", "パーティ編成：オペラ入場"), 383,
@@ -152,18 +168,53 @@ def _calls_before_map(out_dir, akeys, keys, spec, tag):
     return name
 
 
+def _flee_jumps(ms):
+    """The stand-in's checks that jump to its "attacked" block (mode 3: Gau runs off)."""
+    at = [n for n, m in enumerate(ms) if m["label"] == ATTACKED]
+    assert len(at) == 1, f"{RETURN_AI}: {len(at)} {ATTACKED} labels"
+    out = []
+    for n, m in enumerate(ms):
+        k = FLEE_JUMPS.get(m["mnemonic"])
+        iv = m["operands"].get("iValues") or []
+        if k is not None and len(iv) > k and iv[k] == at[0]:
+            out.append(n)
+    return out
+
+
+def gau_stays(out_dir, akeys, keys):
+    """sc_ai_549_Gau without its jumps to the "attacked" block: Nops. Returns how many went."""
+    f = os.path.join(AI_DIR, RETURN_AI + ".json")
+    sc = _read(out_dir, f)
+    ms = sc["Mnemonics"]
+    jumps = _flee_jumps(ms)
+    if not jumps:
+        assert any(m.get("comment") == NO_FLEE for m in ms), f"{RETURN_AI}: no jumps to {ATTACKED} to remove"
+        _key(akeys, keys, f)   # a re-run on the port's own copy
+        return 0
+    assert len(jumps) == 11, f"{RETURN_AI}: {len(jumps)} jumps to {ATTACKED} (vanilla has 11: the script changed)"
+    for n in jumps:
+        nop = Sc.op("Nop", label=ms[n]["label"], kind=ms[n].get("type", 1))
+        nop["comment"] = NO_FLEE
+        ms[n] = nop
+    Sc.save_path(sc, out_dir, f)
+    _key(akeys, keys, f)
+    return len(jumps)
+
+
 def port(out_dir, log, profile=None):
     akeys, keys = C.asset_keys(), {}
     left = no_random_leave(out_dir, akeys, keys)
     zozo = _calls_before_map(out_dir, akeys, keys, ZOZO, TAG + "_zozo")
     terra = _calls_before_map(out_dir, akeys, keys, TERRA, TAG + "_terra")
+    stays = gau_stays(out_dir, akeys, keys)
     for group, kv in keys.items():
         kdir = os.path.join(out_dir, group, "keys")
         os.makedirs(kdir, exist_ok=True)
         with open(os.path.join(kdir, TAG + ".json"), "w", encoding="utf-8") as fh:
             json.dump({"keys": list(kv), "values": list(kv.values())}, fh, indent=1)
     log(f"  party events: Shadow's random leave gone ({len(left)} battle scripts: {', '.join(left) or 'already'}), "
-        f"Zozo unequips the bench and Shadow ({zozo}), Terra and Edgar optimized for the Lete River ({terra})")
+        f"Zozo unequips the bench and Shadow ({zozo}), Terra and Edgar optimized for the Lete River ({terra}), "
+        f"Gau's return after a Leap can't be scared off ({stays or 'already'} checks in {RETURN_AI})")
     return {}
 
 
@@ -212,4 +263,17 @@ def check(mod_dir):
                 out.append(f"{name}: {tag} runs {got} then {nxt['mnemonic']}")
             if not any(m["mnemonic"] == "Jump" and m["operands"]["iValues"][0] == at[0] for m in ms[:at[0]]):
                 out.append(f"{name}: nothing jumps to {tag}")
+    f = os.path.join(AI_DIR, RETURN_AI + ".json")
+    rel = os.path.relpath(f, P.VANILLA)
+    p = os.path.join(mod_dir, rel)
+    if RETURN_AI not in {os.path.basename(v) for v in keyed.get("monster_ai", ())}:
+        out.append(f"{rel}: not in monster_ai/keys/{TAG}.json")
+    if not os.path.exists(p):
+        out.append(f"{rel}: no copy in the mod")
+    else:
+        ms = json.load(open(p, encoding="utf-8"))["Mnemonics"]
+        if _flee_jumps(ms):
+            out.append(f"{RETURN_AI}: Gau's return still runs off when attacked")
+        if sum(m.get("comment") == NO_FLEE for m in ms) != 11:
+            out.append(f"{RETURN_AI}: {sum(m.get('comment') == NO_FLEE for m in ms)} of 11 checks removed")
     return out

@@ -16,7 +16,7 @@ namespace BraveNewWorld.PR
     public class Plugin : BasePlugin
     {
         public const string Guid = "ff6mod.bravenewworld";
-        public const string Version = "0.26.14";
+        public const string Version = "0.26.15";
         internal static ManualLogSource L;
 
         public override void Load()
@@ -228,8 +228,10 @@ namespace BraveNewWorld.PR
             GauRages.Reset = Config.Bind("Gau", "ForgetVanillaStartRages", false,
                 "One time: Gau forgets the 9 starting Rages the port gave him before 0.26.13 (Brawler, Whisper, Were-Rat, " +
                 "Rhinotaur, Lobo, Hornet, Trilobiter, Exocite, M-TekArmor) and learns BNW's Soldier, the next time you're " +
-                "on the field; then it turns itself off. Rages he learned another way stay. Save afterwards.");
+                "on the field. Once per save: the save remembers it once you save (loading a state you didn't save does it " +
+                "again). Rages he learned another way stay. Save afterwards; turn it off when your saves are done.");
             GauRages.Apply(harmony);     // Gau's start rages: BNW's Soldier, not the PR's vanilla 9; none of the rages BNW cut
+            VeldtReturn.Apply(harmony);  // Gau back from a Leap: log lines + harness gaureturn (the fix itself is port_bnw_party_events data)
             FormulaProbe.Init(harmony);  // only when BepInEx/bnw_probe.request exists
             AddComponent<BnwRunner>();
             L.LogInfo($"Brave New World PR plugin loaded: {EsperHooks.D.Espers.Count} espers, " +

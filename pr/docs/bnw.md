@@ -4,6 +4,22 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
 
 ## Live progress (newest first)
 
+- 2026-11-27: **0.26.15: Gau's Leap return survives auto-battle** (the user: "if i autobattle on the last turn of a
+  fight, gau doesn't come back out"). After a won Veldt fight with Gau's return queued (SetGauMode: script-local 2 =
+  2), sc_b_0239's Mode03Before turns the enemy side into a stand-in Gau (monsters 549/550, AI sc_ai_549_Gau) and
+  resumes the battle; the stand-in rejoins on its turn (ModeSet 1 -> Event00 "バトル加入：ガウ") but its AI jumps to
+  ModeSet 3 (Event02: he runs off, still away) when it's damaged or gets a command or item, and auto-battle attacks
+  the only enemy there. The SNES gives no window to hit him. port_bnw_party_events (4.) turns the stand-in's 11 jumps
+  into Nops (its check() and test_mod cover it; test_mod's compiled_scripts() leaves out that step's own files).
+  `VeldtReturn.cs`: [veldt] log lines (queued / rejoined, the stand-in's HP) and harness `gaureturn`. Also the kit
+  session's GauRages: ForgetVanillaStartRages marks the save (flag 8) instead of turning itself off (a reload before
+  saving brought vanilla's 9 back), StartSkills both-copy helpers (kit 8c62ad9). Gate on the PC (--no-warm),
+  build/batches/bnw-0.26.15-release-pc.json: Deck save + switch, auto-battle return (load, warp 5, gaureturn,
+  encount 2002, aikeep, press through the entrance message: rejoined with auto-battle on), New Game gaurages, joinlv
+  all PASS; Rules.Tests 40/40, test_mod 57 OK. Not reproduced headless: the party hitting the stand-in before its
+  turn (it acted first). Harness pitfall: `battle <party>` / `encount` crash in the game's native code while
+  standing on the Veldt (BepInEx/ErrorLog.log: EncountBoss / ExcuteEncount AccessViolation): warp off first.
+
 - 2026-11-27: **Gau's start rages** (the user: "i started with 9 was i supposed to?" and a mix of "2/3" and "75%"
   in the Rage text). No: BNW's initial rage bits (C4/7AA0) hold Soldier alone; the PR's JoinCharacter gave vanilla's
   9 (Brawler, Whisper, Were-Rat, Rhinotaur, Lobo, Hornet, Trilobiter, Exocite, M-TekArmor). Rhinotaur, Lobo and

@@ -272,7 +272,12 @@ def rules():
 
 
 def compiled_scripts():
-    return sorted(glob.glob(os.path.join(MOD_AI, "*.json")))
+    """The mod's compiled AI scripts: not the PR's own scripts a port step edits (port_bnw_party_events:
+    Gau's return stand-in sc_ai_549_Gau, checked by PartyEvents through its check())."""
+    keyfile = os.path.join(MOD, "monster_ai", "keys", "bnw_party_events.json")
+    own = set(json.load(open(keyfile, encoding="utf-8"))["keys"]) if os.path.exists(keyfile) else set()
+    return sorted(p for p in glob.glob(os.path.join(MOD_AI, "*.json"))
+                  if os.path.splitext(os.path.basename(p))[0] not in own)
 
 
 class AiScripts(unittest.TestCase):
