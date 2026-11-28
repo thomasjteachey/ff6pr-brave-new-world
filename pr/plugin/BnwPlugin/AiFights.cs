@@ -33,6 +33,8 @@ namespace BraveNewWorld.PR
             Harness.Register("aistat", _ => Stat(), "aistat: the battle's phase, enemies, the AI host's counts and last acts");
             Harness.Register("endfight", _ => Host.KillAllForTest("endfight"), "endfight: every enemy left dies the game's way");
             Harness.Register("aipummel", _ => Pummel(), "aipummel: queue Sabin's Pummel in the solo phase of the Vargas story fight");
+            Harness.Register("aiact", a => Act(a), "aiact <command> <ability> [character] [PR monster]: queue a party member's act " +
+                "(the first one, or that character status id) on an enemy (the first standing, or that monster), e.g. aiact 10 8 = Steal");
             Harness.Register("flag", a => Flag(a), "flag <category> <index> [value]: read (or set) a script variable, e.g. flag ScenarioFlag2 221 1");
         }
 
@@ -57,6 +59,33 @@ namespace BraveNewWorld.PR
                 BattleActData.TargetType.SingleEnemy, BattleActData.ArmType.Right, (BattleActData.ActAbilityType)0, 1, false);
             battle.BattleActExection.SetBattleActData(act);
             return $"queued Sabin's Pummel against Vargas at {Harness.Hp(vargas)} (Sabin corps index {sabin.corpsIndex})";
+        }
+
+        // Queue any command + ability as if the party member had picked it (story fights whose scene a command starts:
+        // Locke's Steal on the Merchant / Trooper in South Figaro, QA 2026-11-28)
+        static string Act(string[] a)
+        {
+            if (a.Length < 2 || !int.TryParse(a[0], out int cmdId) || !int.TryParse(a[1], out int abId))
+                return "error: aiact <command> <ability> [character] [PR monster]";
+            int who = a.Length > 2 && int.TryParse(a[2], out int w) ? w : 0, mon = a.Length > 3 && int.TryParse(a[3], out int m) ? m : 0;
+            var battle = BattlePlugManager.Instance();
+            if (battle == null || !battle.IsBattle()) return "error: not in a battle";
+            var user = battle.GetPlayerUnits().FirstOrDefault(p => p != null && p.BattleUnitDataInfo?.Parameter?.CurrentHP > 0 &&
+                (who == 0 || p.ownedCharacterData?.characterStatusId == who));
+            var target = battle.GetEnemyUnits().FirstOrDefault(e => e != null && e.BattleUnitDataInfo?.Parameter?.CurrentHP > 0 &&
+                (mon == 0 || e.GetMonster()?.Id == mon));
+            if (user == null || target == null) return $"error: no {(user == null ? $"party member {who}" : $"enemy {mon}")} standing";
+            var command = PrKit.Master.Get<Last.Data.Master.Command>(cmdId);
+            var ability = PrKit.Master.Get<Last.Data.Master.Ability>(abId);
+            if (command == null || ability == null) return $"error: no command {cmdId} / ability {abId}";
+            var abilities = new Il2CppSystem.Collections.Generic.List<Last.Data.Master.Ability>();
+            abilities.Add(ability);
+            var targets = new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppReferenceArray<BattleUnitData>(1);
+            targets[0] = target;
+            var act = new BattleActData(user, targets, command, abilities, BattleActData.ActType.Normal,
+                BattleActData.TargetType.SingleEnemy, BattleActData.ArmType.Right, (BattleActData.ActAbilityType)0, 1, false);
+            battle.BattleActExection.SetBattleActData(act);
+            return $"queued command {cmdId} ability {abId} by character {user.ownedCharacterData?.characterStatusId} on monster {target.GetMonster()?.Id} at {Harness.Hp(target)}";
         }
 
         // the event scripts' variables (DataStorage: ScenarioFlag1-4, TreasureFlag1-4, ScenarioVariable...), by the
