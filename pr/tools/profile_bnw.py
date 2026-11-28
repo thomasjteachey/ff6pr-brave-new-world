@@ -201,6 +201,9 @@ class BraveNewWorld(Profile):
                                                 ("Tier2_LeftGuy.bin", 0x16E0, 0x20, 2), ("Tier2_Tiger.bin", 0x1C10, 0x60, 4)],
                                             3: [("Tier3_Goddess.bin", 0x1590, 0x20, 6), ("Tier3_God.bin", 0x1870, 0x20, 3)]})
     sprite_standins = {311: 37}    # if Kaiser's own art is ever left out: Doom Dragon's
+    # which encounter types each fight allows: BNW's formation masks (port_encounters.port_encounter_types; the
+    # Figaro chase is front only in BNW, a forced back attack in the PR)
+    encounter_types = True
     # encounter types: BNW weights back/pincer/side/normal 33/33/33/156 of 255 (c2.asm:3953;
     # vanilla 31/8/8/208 = the PR's 13/3/3/68+13 preemptive) -> 13/13/13 and normal 48, the
     # PR's preemptive 13 kept; pincers start the party's ATB like a front attack

@@ -519,6 +519,36 @@ class Encounters(unittest.TestCase):
         r = merged("monster_set").rows[137]
         self.assertTrue(all(int(r[f"monster_set{k}"]) >= 2000 for k in range(1, 5)), r)
 
+    def test_encounter_types_from_bnw_rom(self):
+        """Every party the SNES AI data maps to a formation (bnw_data.json snes_ai formations) allows BNW's
+        encounter types (front/back/pincer/side, CF5900 byte 0) where BNW changed the formation's mask from
+        vanilla's (port_encounters.port_encounter_types). The Figaro chase, party 35 = BNW formation 47, opens
+        as a front attack only, not the PR's forced back attack (salapimp's report, 2026-11-28)."""
+        import ff6snes as SN
+        import idmap as M
+        import port_encounters as E
+        rom = self.bnw_rom()
+        van = SN.Rom(P.VANILLA_ROM)
+        parties = merged("monster_party")
+        forms = {int(p): f for p, f in json.load(open(os.path.join(MOD, "bnw_data.json"), encoding="utf-8"))["snes_ai"]["formations"].items()}
+        self.assertEqual(forms[35], 47)
+        self.assertEqual(E.pattern_mask(parties.rows[35]), 1, parties.rows[35])
+        vparties = P.Table("monster_party")
+        boss = {int(r["id"]) for r in P.Table("monster") if r["boss"] != "0"}
+        pf, bad = M.party_formation(), []
+        for p, f in forms.items():
+            row, bm = parties.rows.get(p), E.encounter_mask(rom, f)
+            if row is None or bm is None or (pf.get(p) is not None and E.encounter_mask(van, pf[p]) == bm):
+                continue
+            plain = row["script_name"] in E.GENERIC_BATTLE_SCRIPTS and \
+                not any(int(row[f"monster{k}"]) in boss for k in range(1, 10))
+            was = E.pattern_mask(vparties.rows[p]) if p in vparties.rows else None
+            if not plain and (was is None or E.added_types(was, bm)):
+                continue   # a boss or scripted fight the mod opens to more types: the PR's kept
+            if E.pattern_mask(row) != bm:
+                bad.append((p, f, E.pattern_mask(row), bm))
+        self.assertEqual(bad, [])
+
 
 class AiAbilityNames(unittest.TestCase):
     def test_every_ai_ability_has_a_name(self):

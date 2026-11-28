@@ -4,6 +4,30 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
 
 ## Live progress (newest first)
 
+- 2026-11-28: **Encounter types from BNW's formations** (Nexus report, salapimp: the Figaro chase's two Magitek Armor
+  "two-shot any character and get in several hits before you can act due to it being a back attack"). The PR forces
+  that fight (party 35, map 20050 sc_e_0036_3) to a back attack; BNW's formation for it (47, aux byte 0 0xE3, vanilla
+  34's 0x43) allows a front attack only, and on a back attack BNW gives monsters a full ATB (FirstStrike.cs). Its
+  stats (250 HP, Def 150, MDef 100), the 3x Special (0x23) and Tek Missile (power 24) are BNW's own and ported right;
+  its AI (Special / Tek Missile x2 outside formation 321) too. The SNES rolls the type in every battle (C2/2E3A, story
+  fights too) from aux byte 0 (C2/3150: XOR $F0; bits 4-7 front/back/pincer/side; BNW's code identical); the porter
+  never wrote it. Now `port_encounters.port_encounter_types` (profile `encounter_types`, from port_ai with the SNES AI
+  data's party -> formation map): 750 parties take BNW's mask (many early fights front only); 37 boss / scripted
+  fights BNW opens to back/pincer/side keep the PR's (its routines place monsters for that opening; logged "kept the
+  PR's", SNES_PR_DISCREPANCIES.md row). test_mod `test_encounter_types_from_bnw_rom`: 58 OK; Rules.Tests 40/40.
+  In-game check build/batches/bnw-figaro-chase-front.json (encount 35: "[atb] first strike (Normal").
+
+- 2026-11-28 (night): **Returners' briefing freeze after Locke leaves: not reproduced** (Nexus bug report on mod 167,
+  "Returner's Hideout game freeze", BNW 0.26.15: the scene "just sits there" after the wounded soldier's news and
+  Locke's exit; the user replied asking for the save; the 0.26.15 zip's sc_e_0062*, entity_default and bnw_dialog are
+  byte-identical to the files tested here). The scene: sc_e_0062_2 (Banon's "Yes") and sc_e_0062_1
+  (the third "No": ScenarioFlag3 32/33 + AreaLocalVariable 1 = 1), both with port_bnw_scenes.briefing's hook (Edgar
+  "Uh, Locke..." / Locke "Right." / Sabin, BNW_D016B-D). Played to their ChangeMap 72 (sc_e_0062_3) on PC: _2 from a
+  new game with messages skipped and shown, and with graphics (shots: all three lines, then Banon); _1 from the Deck's
+  2022 slot 11 (Locke, Terra, Edgar, Sabin; sandbox build/save_sandbox/deck_hideout_20261128). From a new game's
+  party _1 stops at OrganizePartySlot (no Edgar/Sabin): a test artifact. PC and Deck files identical
+  (entity_default, both scripts). Batches: build/batches/bnw-briefing*.json (`flag` sets the No x3 path). Open: the
+  reporter's save (load it with savesandbox= and run bnw-briefing's steps), their answer to Banon, other mods.
 - 2026-11-28: **0.26.16: a Leap ends the Veldt's Phantom Train fights** (the user, Deck, again: Gau leapt, the fight
   went on). The diagnostic build caught it: party 2052 (3x PR monster 80), `judgment enabled False`, the AI host not
   holding, isForceOnSave set. BNW's Veldt (port_veldt) offers 6 Phantom Train formations on their train parties
