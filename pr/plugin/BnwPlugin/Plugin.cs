@@ -16,7 +16,7 @@ namespace BraveNewWorld.PR
     public class Plugin : BasePlugin
     {
         public const string Guid = "ff6mod.bravenewworld";
-        public const string Version = "0.26.18";
+        public const string Version = "0.26.19";
         internal static ManualLogSource L;
 
         public override void Load()
