@@ -41,8 +41,20 @@ Shadow", "Zozo Unequip", "Scenario Unequip"), plus Gau's return after a Leap (4)
    "ダメージを受けた時" block become Nops: it always takes the rejoin (dried meat still works). The first meeting's
    Gau (sc_ai_172_Gau) still runs off when attacked, as on the SNES.
 
+5. A Leap ends every Veldt fight. The SNES's Leap ends any battle it's used in. The PR's Veldt scripts (sc_b_0239, the
+   generic battle; sc_b_2006/2008/2027) end it themselves: each loop "とびこむで離脱" (Current.RemoveGauInBattle,
+   tools/decomp/leap_end: a party member with Dive leaves the party, script-local 0 = -1), then "RemoveGau":
+   BattleEndEnabled 1, BattlePause, RemoveAllAct, BattleForceExitOnSave. BNW's Veldt also offers the Phantom Train's
+   formations (port_veldt: parties 2050-2080, their train look and battle script): sc_b_2026 (9026, "魔列車で通常戦闘")
+   turns the end judgment off at its start (BattleEndEnabled 0) and on only at its own end ("とりつくで離脱", the
+   Ghosts' possessions undone), so the Leap's own end (DiveConditionFunction.ActEndUpdate: isForceOnSave) never
+   came and the fight went on until the monsters died (the user, Deck, 2026-11-27, party 2052). Its loop gets the
+   same Leap check before its "プレイヤーの状況で戦闘終了" (skipped while script-local 0 is already -1, so the script's own
+   end is never mistaken for a Leap), then its possession clean-up and the RemoveGau steps. On the Phantom Train
+   Gau can't Leap (SpecialCommands: Leap only in the Veldt's parties), so the train's fights run as before.
+
     port(out_dir, log, profile=None)   writes the scripts' copies and <group>/keys/bnw_party_events.json
-    check(mod_dir)                      problems in a port's copies ([] when all three are in)
+    check(mod_dir)                      problems in a port's copies ([] when all are in)
 
 Each edit asserts the PR script still looks as described (a changed script fails the port) and reads the
 port's own copy when an earlier step wrote one; a re-run on the port's copy changes nothing.
@@ -70,6 +82,12 @@ RETURN_AI = "sc_ai_549_Gau"
 ATTACKED = "ダメージを受けた時"
 FLEE_JUMPS = {"DamagedJump": 0, "IsCheckReceiveCommand": 1, "IsRecevieItem": 1}
 NO_FLEE = "BNW: Gau's return after a Leap can't be scared off (port_bnw_party_events)"
+
+# 5. A Leap in a Veldt fight whose PR battle script turns the end judgment off: (script, the op the check goes before)
+LEAP_EXIT = "とびこむで離脱"          # Current.RemoveGauInBattle
+LEAP_SCRIPTS = {"sc_b_2026": ("SysCall", "プレイヤーの状況で戦闘終了")}
+LEAP_CLEANUP = {"sc_b_2026": ["とりつくで離脱"]}   # the script's own end steps before its BattleEndEnabled 1
+LEAP_TAG = TAG + "_leap"
 
 # 2. Zozo: (PR script, the op after which the party is final, the ChangeMap's first iValue, SysCalls before it)
 ZOZO = ("sc_e_0307_1", ("SysCall", "パーティ編成：オペラ入場"), 383,
@@ -201,12 +219,52 @@ def gau_stays(out_dir, akeys, keys):
     return len(jumps)
 
 
+def _leap_ops(name):
+    """The Leap check: script-local 0 still 0, "とびこむで離脱", and if it took Gau out (local 0 = -1) the
+    PR's RemoveGau end (sc_b_0239[29-37]) after the script's own clean-up; else on with the script."""
+    br = lambda target: Sc.op("Branch", i=[0, -1, target], s=["ScriptLocalVariable", "＝", "imm"])
+    return ([br("@vanilla"), Sc.op("SysCall", s=[LEAP_EXIT]), br("@leap"), Sc.op("Jump", i=["@vanilla"]),
+             Sc.label("leap")]
+            + [Sc.op("SysCall", s=[c]) for c in LEAP_CLEANUP.get(name, [])]
+            + [Sc.op("BattleEndEnabled", i=[1]), Sc.op("Wait", r=[1.4]), Sc.op("BattlePause", i=[1]),
+               Sc.op("SysCall", s=["RemoveAllAct"]), Sc.op("BattleForceExitOnSave"), Sc.op("Exit")])
+
+
+def leap_ends(out_dir, akeys, keys):
+    """Each of LEAP_SCRIPTS: its op becomes a Jump to the Leap check, which goes on with the op and the rest of
+    its block. Returns the scripts done."""
+    done = []
+    for name, (mn, want) in sorted(LEAP_SCRIPTS.items()):
+        f = os.path.join(BATTLE_DIR, name + ".json")
+        sc = _read(out_dir, f)
+        ms = sc["Mnemonics"]
+        if any(m["label"] == LEAP_TAG for m in ms):
+            _key(akeys, keys, f)   # a re-run on the port's own copy
+            continue
+        assert any(m["mnemonic"] == "BattleEndEnabled" and not m["operands"]["iValues"][0] for m in ms),             f"{name}: no BattleEndEnabled 0 (the script changed: is the check still needed?)"
+        assert not any(m["mnemonic"] == "SysCall" and _sv0(m) == LEAP_EXIT for m in ms), f"{name}: already has {LEAP_EXIT}"
+        at = [n for n, m in enumerate(ms) if m["mnemonic"] == mn and _sv0(m) == want]
+        assert len(at) == 1, f"{name}: {len(at)} {mn} {want} (the script changed)"
+        # the block carries on with the script's own code from the op to its next label (a jump target: the
+        # checker wants every target a labelled Nop, so no jump back into the middle of the loop)
+        n = at[0]
+        nxt = next(k for k in range(n + 1, len(ms)) if ms[k]["mnemonic"] == "Nop" and ms[k]["label"])
+        rest = Sc.copy_ops(sc, n, nxt) + [Sc.op("Jump", i=[nxt])]
+        start = Sc.append(sc, LEAP_TAG, _leap_ops(name) + [Sc.label("vanilla")] + rest)
+        ms[n] = Sc.op("Jump", i=[start], label=ms[n]["label"], kind=ms[n].get("type", 1))
+        Sc.save_path(sc, out_dir, f)
+        _key(akeys, keys, f)
+        done.append(name)
+    return done
+
+
 def port(out_dir, log, profile=None):
     akeys, keys = C.asset_keys(), {}
     left = no_random_leave(out_dir, akeys, keys)
     zozo = _calls_before_map(out_dir, akeys, keys, ZOZO, TAG + "_zozo")
     terra = _calls_before_map(out_dir, akeys, keys, TERRA, TAG + "_terra")
     stays = gau_stays(out_dir, akeys, keys)
+    leaps = leap_ends(out_dir, akeys, keys)
     for group, kv in keys.items():
         kdir = os.path.join(out_dir, group, "keys")
         os.makedirs(kdir, exist_ok=True)
@@ -214,7 +272,8 @@ def port(out_dir, log, profile=None):
             json.dump({"keys": list(kv), "values": list(kv.values())}, fh, indent=1)
     log(f"  party events: Shadow's random leave gone ({len(left)} battle scripts: {', '.join(left) or 'already'}), "
         f"Zozo unequips the bench and Shadow ({zozo}), Terra and Edgar optimized for the Lete River ({terra}), "
-        f"Gau's return after a Leap can't be scared off ({stays or 'already'} checks in {RETURN_AI})")
+        f"Gau's return after a Leap can't be scared off ({stays or 'already'} checks in {RETURN_AI}), "
+        f"a Leap ends the Veldt's Phantom Train fights ({', '.join(leaps) or 'already'})")
     return {}
 
 
@@ -263,6 +322,20 @@ def check(mod_dir):
                 out.append(f"{name}: {tag} runs {got} then {nxt['mnemonic']}")
             if not any(m["mnemonic"] == "Jump" and m["operands"]["iValues"][0] == at[0] for m in ms[:at[0]]):
                 out.append(f"{name}: nothing jumps to {tag}")
+    for name in sorted(LEAP_SCRIPTS):
+        sc = mine(os.path.join(BATTLE_DIR, name + ".json"))
+        if not sc:
+            continue
+        ms = sc["Mnemonics"]
+        at = [n for n, m in enumerate(ms) if m["label"] == LEAP_TAG]
+        if not at:
+            out.append(f"{name}: no {LEAP_TAG} block (a Leap can't end its fights)")
+            continue
+        blk = ms[at[0]:]
+        if not any(m["mnemonic"] == "SysCall" and _sv0(m) == LEAP_EXIT for m in blk) or                 not any(m["mnemonic"] == "BattleForceExitOnSave" for m in blk):
+            out.append(f"{name}: {LEAP_TAG} lacks {LEAP_EXIT} or its forced exit")
+        if not any(m["mnemonic"] == "Jump" and m["operands"]["iValues"][0] == at[0] for m in ms[:at[0]]):
+            out.append(f"{name}: nothing jumps to {LEAP_TAG}")
     f = os.path.join(AI_DIR, RETURN_AI + ".json")
     rel = os.path.relpath(f, P.VANILLA)
     p = os.path.join(mod_dir, rel)

@@ -16,7 +16,7 @@ namespace BraveNewWorld.PR
     public class Plugin : BasePlugin
     {
         public const string Guid = "ff6mod.bravenewworld";
-        public const string Version = "0.26.15";
+        public const string Version = "0.26.16";
         internal static ManualLogSource L;
 
         public override void Load()
@@ -275,7 +275,7 @@ namespace BraveNewWorld.PR
             if (frame % 60 == 30) Schematics.Sync();   // Figaro's World of Ruin soldier as Julian; Auto Crossbow's numbers
             if (frame % 120 == 90) JoinLevels.Sync();   // older saves: a Banon who joined at the PR's -3 raised once
             if (frame % 120 == 100) GauRages.Sync();    // older saves: Gau's rages BNW cut un-learned, Soldier once
-            if (frame % 10 == 0) { BattleRewards.Track(); WaitGauge.Track(); StatusTicks.Track(); TickDeaths.Track(); }
+            if (frame % 10 == 0) { BattleRewards.Track(); WaitGauge.Track(); StatusTicks.Track(); TickDeaths.Track(); VeldtReturn.Track(); }
             if (frame % 300 == 200) MenuRules.Track();   // one-time log self-test (Umaro's menu)
             if (frame % 10 == 5) BnwMonsterImages.Track();   // the final battle tower: a statue part that dies leaves the picture
             BattleFormulas.Track();  // Shock's cost to its user, after its hits

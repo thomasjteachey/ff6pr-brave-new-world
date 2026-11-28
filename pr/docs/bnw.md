@@ -4,6 +4,41 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
 
 ## Live progress (newest first)
 
+- 2026-11-28: **0.26.16: a Leap ends the Veldt's Phantom Train fights** (the user, Deck, again: Gau leapt, the fight
+  went on). The diagnostic build caught it: party 2052 (3x PR monster 80), `judgment enabled False`, the AI host not
+  holding, isForceOnSave set. BNW's Veldt (port_veldt) offers 6 Phantom Train formations on their train parties
+  (2050-2080), whose script sc_b_2026 ("魔列車で通常戦闘") turns the end judgment off at its start and on only at its
+  own end ("とりつくで離脱", possessions undone), so the Leap's end never came. Vanilla's Veldt fights all run Veldt
+  scripts (367 of 371 sc_b_0239; Goetia/Chaser/Pudding's with the same Leap exit). Fix (data,
+  port_bnw_party_events 5.): BNW's sc_b_2026 loop runs the PR's Leap exit before its "プレイヤーの状況で戦闘終了":
+  unless script-local 0 is already -1, "とびこむで離脱" (RemoveGauInBattle: a dived Gau leaves the party, local 0 =
+  -1), then its own "とりつくで離脱" and sc_b_0239's RemoveGau steps (BattleEndEnabled 1, BattlePause, RemoveAllAct,
+  BattleForceExitOnSave). The train itself is unchanged in play (no Leap there). check() + test_mod cover it.
+  PC: Leap in party 2052 ends it in 3 s and Gau is gone from the next fight; a normal win still ends
+  (build/batches/bnw-leap-train.json). Still open: the first report (party 2009, the Veldt script) didn't
+  reproduce; the watch stays in. Also on the Veldt without a Veldt script: 6 parties with none (2035, 2039, 2083,
+  2091, 2132, 2458) and 2 Cultists' Tower ones (sc_b_2024), not checked in game: neither turns the end judgment
+  off, but Gau's return after a win (SetGauMode) only comes in Veldt-script fights.
+
+- 2026-11-27 (evening): **Leap that didn't end a Bomb fight: not reproduced; diagnostic build on the Deck** (the
+  user, Deck: Gau leapt on 3 Bombs, vanished, his ATB kept filling, the fight went on until Sabin and Cyan won it).
+  The Deck's logs: party 2009, Sabin's Fight chosen before the Leap (0.63 s wait) and landing only at 20:03:22, the
+  Leap first (0 s wait), ~60 s with nobody acting, Battle Options' Pause on (off on the PC), no rewards line for that
+  fight, and **Gau still in the party in the next fight** (hit at 20:04:21; a later Leap took him). So Gau most
+  likely never kept the Dive status (614) through to an act's end, rather than the end check being blocked. How the
+  PR ends a Leap: DiveConditionFunction.ActEndUpdate (every act end, all units) sets BattleEndJugment.isForceOnSave;
+  Execute (from BattleActExection.EndFinishingState, skipped while battleActDataStackInterrupt's next act is
+  NotDelete/Final) makes it ForcedOnSave, only while enabled, resultType None and CurrentEndJugmentType Normal.
+  The kit AI host's end holds (F5 mode 4, death entries) can't come from BNW's Bomb script (no F5). PC runs, all
+  ending in 1-3 s with ForcedOnSave: leap at once / after the Bombs acted 15 s / at a Bomb that blew up / with Sabin's
+  Fight queued first, modes 0 and 1, Pause off and on (`build/batches/bnw-leap-{late,dead,many,other,chant-pause}.json`).
+  Each time a Bomb counters the Leap (kit host: attack EF) and the fight still ends. Diagnostics (VeldtReturn.cs,
+  installed on PC + Deck, not in a release): `[veldt] Dive ActEndUpdate ran: isForceOnSave ...`, a warning
+  `[veldt] Leap didn't end the battle in 3 s: Gau dived / has NO Dive ...` (6 s after his Leap played, or 3 s of Dive)
+  with the judgment, the AI host's hold, the act stacks and the units, and `[veldt] Gau's Dive lifted in battle`;
+  harness `divewatch`, `leap ... [dead] [other]`. Next time it happens the Deck log says which. Harness pitfall
+  found: `totitle` during sc_secede_gau (after a mode-1 Leap) leaves the next battle without its script: won at once.
+
 - 2026-11-27: **0.26.15: Gau's Leap return survives auto-battle** (the user: "if i autobattle on the last turn of a
   fight, gau doesn't come back out"). After a won Veldt fight with Gau's return queued (SetGauMode: script-local 2 =
   2), sc_b_0239's Mode03Before turns the enemy side into a stand-in Gau (monsters 549/550, AI sc_ai_549_Gau) and
