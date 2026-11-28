@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using HarmonyLib;
 using Last.Battle;
 using Last.Battle.Function;
@@ -15,10 +16,12 @@ namespace BraveNewWorld.PR
     // CommandLimits:
     //  * Leap (PR command 24, ability 16, type 615 "Dive"): only in a leapable fight (C2/542A
     //    ChkMenu_Leap: the formation's own Veldt flag, $F5900 + 4f byte 3 bit 1 clear, wherever it
-    //    is fought) and only while a second party member stands (C23B71: "Cannot Leap" alone).
-    //    The PR's battle menu asks CommandAvailableData.IsAvailable (it greys out Morph that way);
-    //    Leap answers no unless the fight's party is on the loaded Veldt table (port_veldt.py lists
-    //    every PR party of each of the mod's Veldt formations) and another member stands.
+    //    is fought: readme "Leap Anywhere") and not once Gau knows every rage of the fight (C2/6535
+    //    LeapDis, Bropedio). The PR's battle menu asks CommandAvailableData.IsAvailable (it greys out
+    //    Morph that way); Leap answers no unless the fight's party is on the loaded Veldt table
+    //    (port_veldt.py lists every PR party of each of the mod's Veldt formations) and one of its
+    //    rages is still unknown. Gau alone keeps Leap on the menu: BNW's Leap then misses with
+    //    "Cannot Leap" (C23B71), as the PR's own Dive does ("Can't leap!", MSG_SYSTEM_006).
     //  * Mimic (BattleImpersonationFunctionFF6, decompiled tools/decomp/leap_mimic): BNW wipes
     //    Mimic's memory after each Mimic (C2/0224 ResetMimic), so Gogo can't mimic his own Mimic
     //    (chains with Palidor). The PR walks its act log back to the last act it may copy; when
@@ -45,9 +48,46 @@ namespace BraveNewWorld.PR
                 prefix: nameof(Copy_Prefix));
             Hooks.Patch(h, typeof(CounterModule), "SetCounter", typeof(SpecialCommands),
                 prefix: nameof(SetCounter_Prefix), postfix: nameof(SetCounter_Postfix));
+            var create = AccessTools.Method(typeof(InstantiateManager), "Create");
+            if (create != null) h.Patch(create, postfix: new HarmonyMethod(typeof(SpecialCommands), nameof(Create_Postfix)));
+            PrKit.Harness.Register("leapcheck", a => LeapCheck(a), "leapcheck [teach|forget]: in battle, the game's own command check for " +
+                "Gau's Leap (BNW's limits on); teach / forget: Gau learns / un-learns this fight's BNW rages first (memory only)");
+        }
+
+        static string LeapCheck(string[] a)
+        {
+            var battle = BattlePlugManager.Instance();
+            if (battle == null || !battle.IsBattle()) return "error: not in a battle";
+            var gau = battle.GetPlayerUnits().FirstOrDefault(u => u?.ownedCharacterData?.characterStatusId == GauRages.Gau)?.ownedCharacterData;
+            var p = FightParty(battle);
+            if (gau == null || p == null) return "error: no Gau or no monster party";
+            var rages = FightRages(p).Where(GauRages.Bnw.Contains).ToList();
+            string did = "";
+            if (a.Contains("teach")) { foreach (int id in rages) PrKit.Ff6.StartSkills.Teach(gau, id); did = $"taught [{string.Join(" ", rages)}]; "; }
+            if (a.Contains("forget")) { var f = PrKit.Ff6.StartSkills.Forget(gau, rages.Contains); did = $"forgot [{string.Join(" ", f)}]; "; }
+            return "leapcheck: " + did + (BattleCheck() ?? "no check yet");
         }
 
         // --- Leap ----------------------------------------------------------------------------
+
+        // The fight's monster party. BattlePlugManager.MonsterParty is unset in some battles (harness and event
+        // battles, 2026-11-28: "party unknown" in a harness encount 2009), so the party InstantiateManager.Create made
+        // the battle from stands in (as in the kit's SnesAiHost).
+        static int createdParty;
+        public static void Create_Postfix(int __0) => createdParty = __0;
+
+        internal static int FightPartyId(BattlePlugManager battle) =>
+            battle?.MonsterParty?.Id is int id && id > 0 ? id : createdParty;
+
+        static MonsterParty FightParty(BattlePlugManager battle)
+        {
+            var p = battle?.MonsterParty;
+            if (p != null && p.Id > 0) return p;
+            return createdParty > 0 ? MasterManager.Instance?.GetData<MonsterParty>(createdParty) : null;
+        }
+
+        static List<int> FightRages(MonsterParty p) =>
+            PrKit.Ff6.SnesRagesRules.Rages(new[] { p.Monster1, p.Monster2, p.Monster3, p.Monster4, p.Monster5, p.Monster6 }.Where(id => id > 0));
 
         static readonly HashSet<int> leapParties = new HashSet<int>();
         static object leapTable;
@@ -76,6 +116,20 @@ namespace BraveNewWorld.PR
             }
             return leapParties.Contains(partyId);
         }
+
+        // BNW's LeapDis (c2.asm C2/6535, Bropedio): Leap is off when every monster of the formation is in the rage list
+        // ($1D2C). A monster with no BNW rage has nothing to teach, so it counts as learned (on the SNES one Leap would
+        // set its bit; the port un-learns rages outside BNW's 64, GauRages.Sync).
+        internal static bool AllRagesKnown(BattlePlugManager battle, OwnedCharacterData c)
+        {
+            var p = FightParty(battle);
+            if (p == null || c == null) return false;
+            return RagesKnown(FightRages(p), GauRages.Bnw.Contains, id => PrKit.Ff6.StartSkills.Knows(c, id));
+        }
+
+        // the rule itself: no rage left to learn among the fight's rages
+        internal static bool RagesKnown(IEnumerable<int> rages, Func<int, bool> isRage, Func<int, bool> knows) =>
+            rages.All(id => !isRage(id) || knows(id));
 
         static readonly ConditionType[] Gone =
         {
@@ -108,13 +162,12 @@ namespace BraveNewWorld.PR
             {
                 var battle = BattlePlugManager.Instance();
                 if (battle == null || !battle.IsBattle()) return;
-                // (an event battle leaves MonsterParty unset: then only the second-member rule)
-                int party = battle.MonsterParty?.Id ?? 0;
+                int party = FightPartyId(battle);
                 string why = party > 0 && !Leapable(party) ? $"party {party} is no Veldt formation"
-                    : Standing(battle) < 2 ? "no one else stands" : null;
+                    : AllRagesKnown(battle, targetData) ? $"{targetData?.Name} knows every rage in party {party}" : null;
                 if (why == null) return;
                 __result = false;
-                Hooks.NoteOnce("leap-" + (why.StartsWith("party") ? "formation" : "alone"),
+                Hooks.NoteOnce("leap-" + (why.StartsWith("party") ? "formation" : "known"),
                     () => $"[commands] Leap off for {targetData?.Name}: {why} (BNW)");
             }
             catch (Exception e) { Hooks.WarnOnce("SpecialCommands.Leap", e); }
@@ -196,15 +249,16 @@ namespace BraveNewWorld.PR
             if (battle == null || !battle.IsBattle()) return null;
             var units = battle.GetPlayerUnits();
             if (units == null || units.Count == 0) return null;
-            var c = units[0]?.TryCast<BattlePlayerData>()?.ownedCharacterData;
+            var c = (units.FirstOrDefault(u => u?.ownedCharacterData?.characterStatusId == GauRages.Gau) ?? units[0])
+                ?.TryCast<BattlePlayerData>()?.ownedCharacterData;
             var data = Serial.ProviderManager.Instance?.CommandAvailableProvider?.serialData
                 ?.TryCast<Serial.FF6.Management.CommandAvailableData>();
             var leap = MasterManager.Instance?.GetData<Command>(LeapCommandId);
             if (c == null || data == null || leap == null) return null;
-            int party = battle.MonsterParty?.Id ?? 0;
+            int party = FightPartyId(battle);
             bool ok = data.IsAvailable(c, leap, null, null);
             return $"[commands] Leap check in battle: party {(party > 0 ? party.ToString() : "unknown")} {(party <= 0 ? "(no formation rule)" : Leapable(party) ? "is a Veldt party" : "isn't a Veldt party")}, " +
-                   $"{Standing(battle)} standing -> Leap {(ok ? "on" : "off")}";
+                   $"{(AllRagesKnown(battle, c) ? "all its rages known" : "a rage to learn")}, {Standing(battle)} standing -> Leap {(ok ? "on" : "off")}";
         }
 
         // Startup check: the PR's Mimic exclusions (they come from static data, unseen in the

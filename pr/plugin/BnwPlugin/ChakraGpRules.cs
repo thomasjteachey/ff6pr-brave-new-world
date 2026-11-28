@@ -26,14 +26,32 @@ namespace BraveNewWorld.PR
         [ThreadStatic] static int lostBefore;          // BattleAddExpPlug.playerLostGil before that HitCalc
         internal static string Last = "";
 
+        // Every recovery calc the PR has: 137's function 1 (1,1,3,0) isn't known to go through the two ItemHealRules
+        // hooks (the user 2026-11-28: Gau's Scrapper rage Chakra healed everyone for 1 = 137's standard_value, so
+        // the rule never ran). The postfix is idempotent if one of these calls another.
+        static readonly (string Name, Type[] Args)[] RecoveryCalcs =
+        {
+            ("GetRecoveryStatus", Type.EmptyTypes),
+            ("GetFixedRecoveryStatus", Type.EmptyTypes),
+            ("GetFixedRecoveryStatus", new[] { typeof(int) }),
+            ("GetFixedBaseValueRecoveryStatus", new[] { typeof(int) }),
+            ("GetFixedResultValueRecoveryStatus", new[] { typeof(int) }),
+        };
+
         public static void Apply(Harmony h)
         {
             if (!Enabled) return;
             var calc = typeof(CalcControllerProvider);
-            foreach (var m in new[] { "GetRecoveryStatus", "GetFixedBaseValueRecoveryStatus" })
-                Hooks.Patch(h, calc, m, typeof(ChakraGpRules), postfix: nameof(Chakra_Postfix));
+            foreach (var (m, args) in RecoveryCalcs)
+                Hooks.Patch(h, calc, m, typeof(ChakraGpRules), postfix: nameof(Chakra_Postfix), args: args);
             Hooks.Patch(h, typeof(BattleFunction23), "HitCalc", typeof(ChakraGpRules), prefix: nameof(Unique_Prefix), postfix: nameof(Unique_Postfix));
+            PrKit.Harness.Register("chakra", _ => Trace.Count == 0 ? "chakra: no recovery calc seen" : "chakra: " + string.Join(" | ", Trace),
+                "chakra: the last recovery calcs ChakraGpRules saw (ability, item, hit, the PR's value -> BNW's)");
         }
+
+        // the last recovery results seen (harness "chakra"): what reaches the hook, Chakra or not
+        static readonly System.Collections.Generic.List<string> Trace = new System.Collections.Generic.List<string>();
+        static void Note(string s) { lock (Trace) { Trace.Add(s); if (Trace.Count > 12) Trace.RemoveAt(0); } }
 
         static int Stamina(CharacterParameterBase p) =>
             p.TryCast<PlayerCharacterParameter>() != null ? Math.Clamp(p.ConfirmedVitality(), 0, 255) : BattleFormulas.MonsterStamina(p.ConfirmedMaxHp());
@@ -43,20 +61,25 @@ namespace BraveNewWorld.PR
             if (!Enabled || __instance == null || __result == null) return;
             try
             {
-                if ((__instance.ability?.Id ?? 0) != Chakra || __instance.item != null) return;
-                if (__result.GetHitType() != HitType.Recovery) return;
+                int ab = __instance.ability?.Id ?? 0;
+                var hit = __result.GetHitType();
+                string seen = $"ability {ab} item {__instance.item?.Id ?? 0} {hit} {__result.GetValue(false)}";
+                if (ab != Chakra || __instance.item != null) { Note(seen); return; }
+                if (hit != HitType.Recovery) { Note(seen + " (not a recovery)"); return; }
                 var a = __instance.attack;
                 var t = __instance.target;
-                if (a == null || t == null) return;
+                if (a == null || t == null) { Note(seen + " (no attacker/target)"); return; }
                 if (a.Pointer == t.Pointer)
                 {
                     __result.SetStatus(0, HitType.Miss, __result.GetHitCount(), __result.GetConditions(), false);
+                    Note(seen + " -> caster: miss");
                     return;
                 }
                 int mp = Math.Clamp((Stamina(a) + a.ConfirmedLevel()) / 2, 1, 999);
                 int was = __result.GetValue(false);
                 __result.SetValue(mp);
                 Last = $"chakra: the PR's {was} -> BNW's {mp} MP (Stamina {Stamina(a)}, Lv {a.ConfirmedLevel()})";
+                Note(seen + " -> " + mp);
                 Hooks.NoteOnce("bnw-chakra", () => "[commands] " + Last);
             }
             catch (Exception e) { Hooks.WarnOnce("ChakraGpRules.Chakra", e); }

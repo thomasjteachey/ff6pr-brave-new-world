@@ -16,7 +16,7 @@ namespace BraveNewWorld.PR
     public class Plugin : BasePlugin
     {
         public const string Guid = "ff6mod.bravenewworld";
-        public const string Version = "0.26.17";
+        public const string Version = "0.26.18";
         internal static ManualLogSource L;
 
         public override void Load()
@@ -72,7 +72,7 @@ namespace BraveNewWorld.PR
             var reflectRules = Config.Bind("Battle", "ReflectRules", true,
                 "BNW's Reflect: no timer, but 1 in 3 to break each time it reflects (not from equipment).");
             var commandLimits = Config.Bind("Battle", "CommandLimits", true,
-                "BNW's command limits: Leap only in Veldt formations and while another party member stands; " +
+                "BNW's command limits: Leap in any Veldt formation wherever it's fought, greyed out once Gau knows all its rages;" +
                 "Gogo can't Mimic a Mimic (he fights instead); one counterattack per monster per X-Magic.");
             var danceRules = Config.Bind("Battle", "DanceRules", true,
                 "BNW's Dance: one dance per command, the dancer stays under control (step odds and no stumbling are game data).");

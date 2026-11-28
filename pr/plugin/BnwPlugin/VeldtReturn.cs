@@ -141,7 +141,13 @@ namespace BraveNewWorld.PR
                 bool judged = battle.BattleEndJugment != null && (int)battle.BattleEndJugment.GetEndJugment() != 0;   // ending: nothing to watch
                 var staged = battle.BattleActExection?.inStagingBattleActData;
                 if (staged != null && staged.Command?.Id == 24 && staged.AttackUnitData?.TryCast<BattlePlayerData>()?.ownedCharacterData?.characterStatusId == 12)
-                    leapSeen = now;   // Gau's Leap playing out
+                {
+                    // Gau's Leap playing out. Alone, the game's own Dive misses ("Can't leap!", as BNW's C23B71): no
+                    // stuck Leap to watch for (harness bnw-leap-rules, 2026-11-28: no Dive, Gau stays in the fight)
+                    if (SpecialCommands.Standing(battle) < 2)
+                        Hooks.NoteOnce("leap-alone", () => "[veldt] Gau's Leap with no one else standing: the game's own miss (Can't leap!)");
+                    else leapSeen = now;
+                }
                 var gau = battle.GetPlayerUnits()?.FirstOrDefault(p => p?.ownedCharacterData?.characterStatusId == 12);
                 bool dive = gau != null && HasDive(gau);
                 if (!dive && diveSince >= 0 && !liftLogged && !judged)   // Gau's Dive gone while the battle runs (Gau kept in the party?)

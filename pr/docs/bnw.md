@@ -4,6 +4,29 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
 
 ## Live progress (newest first)
 
+- 2026-11-28: **Chakra restored 1 (the user: "chakra from gau using the rage command healed everyone for 1")**.
+  Ability 137's standard_value is a placeholder 1 that ChakraGpRules replaces with (Stamina + Level) / 2 MP (caster
+  misses); its postfix sat only on GetRecoveryStatus / GetFixedBaseValueRecoveryStatus and never ran in play (no
+  "[commands] chakra" line in any log). Now it hooks all five CalcControllerProvider recovery calcs, plus harness
+  `chakra` (the last recovery results it saw). build/batches/bnw-chakra.json (Gau save, warp 5 1 off the Veldt, battle
+  26: Sabin's Blitz 15/137 and command 23 rage 811 Scrapper on both members) PASS on the laptop: 25-26 MP per ally,
+  caster miss, Blitz and Rage alike. **0.26.18** released with the Leap rules below (both gated on the laptop with the
+  release DLL, md5 1a25d8e0, built from the repo clone's 0.26.17 + ChakraGpRules/SpecialCommands/VeldtReturn/Plugin.cs;
+  AiFights.cs / FirstStrike.cs edits in ff6-mod stay out, untested).
+- 2026-11-28: **Leap greyed out once Gau knows a fight's rages; alone it misses instead** (the user: "isn't in BNW
+  you able to use leap outside the veldt"). BNW's "Leap Anywhere" (readme 1629) was already in: Leap is offered in
+  any formation with BNW's leapable flag, wherever it's fought. Two rules from c2.asm were missing or wrong:
+  (1) LeapDis (C2/6535, Bropedio): Leap is off when every monster of the formation is already in the rage list. Now
+  SpecialCommands.AllRagesKnown (a monster with no BNW rage counts as learned). (2) Gau alone: BNW keeps Leap on the
+  menu and its effect misses with "Cannot Leap" (C23B71), but the port greyed it out. Now it stays on, and the
+  PR's own Dive misses the same way (no Dive, Gau stays in the fight; "Can't leap!" is MSG_SYSTEM_006). VeldtReturn no
+  longer reports that miss as a stuck Leap. Also fixed: BattlePlugManager.MonsterParty is unset in harness (and
+  event) battles, which made both rules see "party unknown". The fight's party now comes from
+  InstantiateManager.Create, as in the kit's SnesAiHost. New harness `leapcheck [teach|forget]`. PC:
+  build/batches/bnw-leap-rules.json PASS (party 2009: Leap on / off after teaching Bomb's rage 893 / on after
+  forgetting it; Sabin and Cyan KO'd: Leap on, the Leap misses, divewatch nothing). Unreleased (next BNW release
+  after 0.26.17); not checked in the Deck's own play. Not seen: the "Can't leap!" text on screen (headless run).
+
 - 2026-11-28: **Encounter types from BNW's formations** (Nexus report, salapimp: the Figaro chase's two Magitek Armor
   "two-shot any character and get in several hits before you can act due to it being a back attack"). The PR forces
   that fight (party 35, map 20050 sc_e_0036_3) to a back attack; BNW's formation for it (47, aux byte 0 0xE3, vanilla
@@ -15,7 +38,14 @@ Owner: BNW lead. Moved verbatim from `pr/PORTING.md` on 2026-11-20 (roadmap item
   data's party -> formation map): 750 parties take BNW's mask (many early fights front only); 37 boss / scripted
   fights BNW opens to back/pincer/side keep the PR's (its routines place monsters for that opening; logged "kept the
   PR's", SNES_PR_DISCREPANCIES.md row). test_mod `test_encounter_types_from_bnw_rom`: 58 OK; Rules.Tests 40/40.
-  In-game check build/batches/bnw-figaro-chase-front.json (encount 35: "[atb] first strike (Normal").
+  In-game check build/batches/bnw-figaro-chase-front.json: encount 35 + a windowless shot (build/shots/
+  figaro-chase-front.png: party on the right, a front attack) PASS on the PC. **0.26.17** released 11-28 ~11:00
+  (GitHub Latest, BNW repo a08bb1e, kit b64c5b1; Nexus 167 via publish-nexus.yml; zip SHA-256 0788cfdc...fa82b07,
+  DLL md5 6a28618e built from the repo clone's 0.26.16 source + version: the Leap session's untested LeapDis edits
+  in SpecialCommands.cs / Plugin.cs stay out). Not on the Deck (the user was playing).
+  Found on the way: FirstStrike.cs (BNW's starting ATB) hooks BattleProgressATB.InitATBGauge, but FF6 runs
+  BattleProgressATBFF6 (its own Init); no run's log has ever shown "[atb] first strike", so BNW's starting-ATB
+  rules seem never to apply in the port (open).
 
 - 2026-11-28 (night): **Returners' briefing freeze after Locke leaves: not reproduced** (Nexus bug report on mod 167,
   "Returner's Hideout game freeze", BNW 0.26.15: the scene "just sits there" after the wounded soldier's news and
